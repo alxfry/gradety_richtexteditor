@@ -1,0 +1,42 @@
+<html>
+	<head>
+		<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.0/jquery.min.js"></script>
+		<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.8.16/jquery-ui.min.js"></script>
+		<script type="text/javascript" src="rangy-core.js"></script>
+		<script type="text/javascript" src="rangy-cssclassapplier.js"></script>
+		<script type="text/javascript" src="jquery.tf.gradety_richtext.js"></script>
+		<script type="text/javascript">
+			$(document).ready(function () {
+				$('#container').gradety_rt();
+				$('#container').gradety_rt('setWindow', window);
+				$('#container').gradety_rt('setRangy', rangy);
+				$('#htmlButton').click(function() {
+					$('#containerContentAsHTML').text($('#content_field').html());
+				});
+			});
+		</script>
+		<style>
+			#container {
+				background-color: #a0a0a0;
+				position: relative;
+				width: 800px;
+				height: 480px;
+			}
+			.bold {
+				font-weight: bold;
+			}
+			.red {
+				color: red;
+			}
+			.headline {
+				font-size: 40;
+			}
+		</style>
+	</head>
+	<body>
+		<input id="htmlButton" type="button" value="Show HTML" />
+		<div id="container"></div>
+		<p/>
+		<div id="containerContentAsHTML"></div>
+	</body>
+</html>
