@@ -32,36 +32,35 @@
 			this.cancel_button = $("<input>").attr("id", "cancel_changes_btn").attr("type", "button").attr("value", "Cancel")
 											.css(button_style).css({'background-color':'#EE1111', 'border-color':'#EE2222'})
 											.appendTo(this.header)
-											.click(function() { that.stopedit(); });
+											.click(function() {
+												that.stopedit();
+												while(that.options.undo_index > 0) {
+													that.undo();
+												}
+											});
 			this.undo_button = $("<input>").attr("id", "undo_btn").attr("type", "button").attr("value", "Undo")
 											.css(button_style).css({'background-color':'#EEEEEE'})
 											.appendTo(this.header)
 											.click(function() { that.undo(); });
 			this.redo_button = $("<input>").attr("id", "redo_btn").attr("type", "button").attr("value", "Redo")
 											.css(button_style).css({'background-color':'#EEEEEE'})
-											.appendTo(this.header);
+											.appendTo(this.header)
+											.click(function() { that.redo(); });
 			this.link_button = $("<input>").attr("id", "link_btn").attr("type", "button").attr("value", "Link...")
 											.css(button_style).css({'float':'top', 'background-color':'#EEEEEE'})
 											.appendTo(this.sidebar)
 											.click(function() {
 												var url = that.options.window.prompt("URL:", "http://");
 												if(url != null) {
-													var contentAsHtml = that.content.html();
 													if(that.options.rangy.getSelection().isCollapsed) {
 														var anchor = that.options.window.prompt("Shown text:", url);
 														if(anchor != null) {
 															that.options.undo_first_change = false;
 															that.saveforundo();
-															that.content.html(contentAsHtml + anchor.link(url));
+															that.content.html(that.content.html() + ("<a href=" + url + " title=\"Link\" class=\"link\" >" + anchor + "</a>"));
 														}
 													}
 													else {
-														/*var linkStart = that.options.rangy.getSelection().anchorOffset;
-														var linkEnd = that.options.rangy.getSelection().focusOffset;
-														var part1 = contentAsHtml.substring(0, linkStart);
-														var part2 = contentAsHtml.substring(linkStart, linkEnd);
-														var part3 = contentAsHtml.substring(linkEnd, contentAsHtml.length);
-														that.content.html(part1 + part2.link(url) + part3);*/
 														that.options.undo_first_change = false;
 														that.saveforundo();
 														that.options.rangy.createCssClassApplier("link", {
@@ -103,6 +102,10 @@
 												that.accept_button.fadeIn(1000);
 												that.cancel_button.fadeIn(1000);
 												that.link_button.fadeIn(1000);
+												that.undo_button.fadeIn(1000);
+												that.undo_button.attr('disabled', 'true');
+												that.redo_button.fadeIn(1000);
+												that.redo_button.attr('disabled', 'true');
 												that.format_button_1.fadeIn(1000);
 												that.format_button_2.fadeIn(1000);
 												that.format_button_3.fadeIn(1000);
@@ -131,6 +134,10 @@
 							if(event.which == 90) {			//CTRL-Z
 								event.preventDefault();
 								that.undo();
+							}
+							else if(event.which == 89) {			//CTRL-Y
+								event.preventDefault();
+								that.redo();
 							}
 						}
 						else {
@@ -168,17 +175,22 @@
 		},
 		undo: function() {
 			if(this.options.undo_index > 0) {
+				if(this.options.undo_index == this.options.undo_stack.length) {
+					this.options.undo_stack.push(this.content.html());
+				}
+				this.redo_button.removeAttr('disabled');
 				this.options.undo_index--;
 				this.content.html(this.options.undo_stack[this.options.undo_index]);
 				if(this.options.undo_index == 0) {
-					this.undo_button.fadeOut();
+					this.undo_button.attr('disabled', 'true');
 					this.options.undo_first_change = true;
 				}
 			}
 		},
 		saveforundo: function() {
-			if(this.options.undo_stack[this.options.undo_index] != this.content.html()) {
-				this.undo_button.fadeIn(1000);
+			//if(this.options.undo_stack[this.options.undo_index] != this.content.html()) {
+				this.undo_button.removeAttr('disabled');
+				this.redo_button.attr('disabled', 'true');
 				if(this.options.undo_first_change) {
 					this.options.undo_index = 1;
 					this.options.undo_stack[this.options.undo_index] = this.content.html();
@@ -190,6 +202,15 @@
 					this.options.undo_stack.push(this.content.html());
 					this.options.undo_index++;
 				}
+			//}
+		},
+		redo: function() {
+			this.undo_button.removeAttr('disabled');
+			this.options.undo_index++;
+			this.content.html(this.options.undo_stack[this.options.undo_index]);
+			if(this.options.undo_index == this.options.undo_stack.length - 1) {
+				this.redo_button.attr('disabled', 'true');
+				this.options.undo_stack.pop();
 			}
 		},
 		applyCSS: function(cssClass) {
