@@ -50,19 +50,27 @@
 													if(that.options.rangy.getSelection().isCollapsed) {
 														var anchor = that.options.window.prompt("Shown text:", url);
 														if(anchor != null) {
+															that.options.undo_first_change = false;
 															that.saveforundo();
 															that.content.html(contentAsHtml + anchor.link(url));
 														}
 													}
 													else {
-														var linkStart = that.options.rangy.getSelection().anchorOffset;
+														/*var linkStart = that.options.rangy.getSelection().anchorOffset;
 														var linkEnd = that.options.rangy.getSelection().focusOffset;
 														var part1 = contentAsHtml.substring(0, linkStart);
 														var part2 = contentAsHtml.substring(linkStart, linkEnd);
 														var part3 = contentAsHtml.substring(linkEnd, contentAsHtml.length);
+														that.content.html(part1 + part2.link(url) + part3);*/
 														that.options.undo_first_change = false;
 														that.saveforundo();
-														that.content.html(part1 + part2.link(url) + part3);
+														that.options.rangy.createCssClassApplier("link", {
+																elementTagName: "a",
+																elementProperties: {
+																	href: url,
+																	title: "Link"
+																}
+															}).toggleSelection();
 													}
 												}
 											});
