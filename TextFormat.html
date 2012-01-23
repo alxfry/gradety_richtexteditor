@@ -8,8 +8,8 @@
 		<script type="text/javascript">
 			$(document).ready(function () {
 				$('#container').gradety_rt();
-				$('#container').gradety_rt('setWindow', window);
-				$('#container').gradety_rt('setRangy', rangy);
+				$('#container').gradety_rt({ window: window, rangy: rangy });
+				//$('#container').gradety_rt({ onStartEditing: function(evt, widget) { alert("HALLO") } });
 				$('#htmlButton').click(function() {
 					$('#containerContentAsHTML').text($('#content_field').html());
 				});
