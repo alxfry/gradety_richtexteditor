@@ -2,143 +2,169 @@
 	$.widget("tf.gradety_rt", {
 		_create: function() {
 			var self = this;
+			var o = this.options;
 			
-			var unnestedElements = new Array(); //Blockelemente; dürfen nicht verschachtelt sein
-			unnestedElements[0]="p";			// wird für applyCSS und paste gebraucht
-			unnestedElements[1]="h1";
-			unnestedElements[2]="h2";
-			unnestedElements[3]="h3";
-			unnestedElements[4]="h4";
-			unnestedElements[5]="h5";
-			unnestedElements[6]="h6";
-			
-			// Kopieren & Einfügen Optionen
-			
-			var allowedElements=new Array();	//Lowercase! Werden nicht gelöscht
-			allowedElements[0]="div"; 			//div wird immer duch <br> ersetzt
-			allowedElements[1]="p";
-			allowedElements[3]="br";
-			//allowedElements[5]="ol";
-			//allowedElements[4]="li";
-			//allowedElements[6]="ul";
-			//allowedElements[4]="span";
-			//allowedElements[6]="font";
-			//allowedElements[7]="pre";
-							 
-			var defaultElements=new Array();	// ersetzt Elemente durch Standard-Elemente ohne Klassen/Attribute
-			defaultElements[0] = "p";
-							
-			var delete_nbsp = true;	//alle &nbsp; werden gelöscht
-			
-			// Ende Kopieren & Einfügen Optionen							
-			
+			//Textfeld erzeugen
 			this.content = $('<div>').attr('id', 'content_field').appendTo(this.element);
+			
+			//Textfeld mit Beispieltext füllen
+			this.content.html('<p>Beispieltext. Blabla 1 Blabla 2</p><h2>Zwischenüberschrift</h2><p>Noch mehr Beispieltext. <strong>Fetter Text.</strong> Und noch mehr.</p>');
+			
+			//Key-Events
 			this.content.keydown(function(event) {
 				if(event.ctrlKey) {
-					if(event.which == 90) {					//CTRL-Z
+					if(event.which == 90) {					//STRG-Z -> Undo
 						event.preventDefault();
 						self.undo();
 					}
-					else if(event.which == 89) {			//CTRL-Y
+					else if(event.which == 89) {			//STRG-Y -> Redo
 						event.preventDefault();
 						self.redo();
+					}
+					else if(event.which == 88) {			//STRG-X -> Arbeitsschritt speichern vor Ausschneiden
+						o.undoFirstChange = false;
+						self.updateUndoStack();
+					}
+					else if(event.which != 65 && event.which != 67 && event.which != 86) {		//STRG-A, STRG-C, STRG-V -> einzige Shortcuts mit Standardbelegung
+						event.preventDefault();
 					}
 				}
 				else {
 					var keys = [
-						8,		//Backspace
-						13,		//Enter
-						32,		//Space
-						46		//Entf
+						8,			//Backspace
+						13,			//Enter
+						32,			//Space
+						46			//Entf
 					];
+					//Arbeitsschritt speichern, bevor einer der obigen Keys eingegeben wird
 					if($.inArray(event.which, keys) != -1) {
-						self.options.undoFirstChange = false;
+						o.undoFirstChange = false;
 						self.updateUndoStack();
 					}
-					else if(self.options.undoFirstChange) {
+					else if(o.undoFirstChange && event.which != 16 && event.which != 20) {
 						self.updateUndoStack();
 					}
+					setTimeout(function() {
+						//Leeres Textfeld mit Standardtext füllen
+						if($.trim(self.content.text()) == '') {
+							self.content.html('<p>Enter text here...</p>');
+						}
+						//automatisch eingefügte <br>-Tags ersetzen/entfernen
+						else if(event.which == 13) {
+							self.content.find('br').replaceWith('&nbsp;');
+						}
+						else {
+							self.content.find('br').replaceWith(' ');
+						}
+					}, 0);
 				}
 			});
-			this.content.bind("paste", function(e) {
-				self.options.undoFirstChange = false;
+			
+			//Paste-Event
+			this.content.bind('paste', function(event) {
+				//Arbeitsschritt speichern
+				o.undoFirstChange = false;
 				self.updateUndoStack();
-				 
-				self.content.find('*').each(function () {					//alle vor Paste vorhandenen Elemente bekommen Klasse "within"
-					$(this).addClass("within");
+				
+				//Originaltext und Auswahl speichern
+				var originalContent = self.content.html();
+				var sel = rangy.getSelection();
+				var anchorNode = sel.anchorNode;
+				var focusNode = sel.focusNode;
+				
+				//Index der Auswahl-Nodes speichern (da Nodes als Objekte gelöscht werden)
+				var anchorNodeIndex = 0, focusNodeIndex = 0;
+				var anchorNodeFound = false, focusNodeFound = false;
+				self._traverseDOMTree(document.getElementById('content_field'), function(node) {
+					if(anchorNodeFound == false) {
+						if(node != anchorNode) {
+							anchorNodeIndex++;
+						}
+						else {
+							anchorNodeFound = true;
+						}
+					}
+					if(focusNodeFound == false) {
+						if(node != focusNode) {
+							focusNodeIndex++;
+						}
+						else {
+							focusNodeFound = true;
+						}
+					}
 				});
 				
-				setTimeout(function() {										//Timeout für Paste
-					
-					var content_desc = self.content.find(":not(.within)");
-					
-					$(content_desc).each(function() {						//für alle Nachkommen des containers
-						var tag = $(this).prop("tagName").toLowerCase();	//HTML-Tag
-						if(($.inArray(tag, allowedElements) == -1)) {		//falls Element nicht in allowedElements
-							if($(this).find(":first-child").length != 0) {	//falls child existiert
-								$(this).find(">:first-child").unwrap(); 	//entferne Element
-							}
-							else if($(this).not(":empty")) {				//falls kein child und nicht leer (Text)
-								var innerContent = this.innerText || this.textContent;
-								$(this).replaceWith(this.html);				//entferne Element, lasse Text stehen;
-							}
-							else {											//leer und kein child -> remove
-								$(this).remove();
-							}															
-						}													
-					});
-					content_desc = self.content.find(":not(.within)");
-					$(content_desc).each(function() {						//Default Elements und <div> ersetzen
-						var tag = $(this).prop("tagName").toLowerCase();
-						if($.inArray(tag, defaultElements) != -1) {
-							$(this).replaceWith("<" + tag + ">" + this.innerHTML + "</" + tag + ">");
-						}													
-						else if(tag == "div") {
-							$(this).replaceWith(this.innerHTML + "</br>");	//ersetze <DIV></DIV> mit </BR>
-						}
-					});
-					
-					if(delete_nbsp) { 										// &nbsp; löschen
-						content_desc = $("#content_field").find(":not(.within)");
-						$(content_desc).each(function() {							
-							this.innerHTML = this.innerHTML.replace(/&nbsp;/gi, " ");
-						}); 												//klappt nicht bei &nbsp; ohne container (zB <br> in Firefox)												
-					}
-					
-					//Überprüfen der Verschachtelung
-					var contentDescNotChildren = self.content.find(":not(.within)").not(self.content.children());
-					contentDescNotChildren.each(function() {
-						var tempTag = $(this).prop("tagName").toLowerCase();
-						if($.inArray(tempTag, unnestedElements) != -1 ) {
-							var innerContent = this.innerText || this.textContent;
-							$(this).unwrap();	
-						}														
-					});
-						
-				}, 0);
+				var anchorOffset = sel.anchorOffset;
+				var focusOffset = sel.focusOffset;
+				
+				//Textfeld leeren
+				self.content.empty();
 				
 				setTimeout(function() {
-					self.content.find('*').each(function () { 				//alte "within" Klasse wird entfernt
-						$(this).removeClass("within");
-						if($(this).hasClass("")) {
-							$(this).removeAttr("class");
+					//nach Paste: Inhalt des Textfeldes = neu eingefügter Text (plain!)
+					var pastedText = self.content.text();
+					
+					//Zustand vor Paste wiederherstellen
+					self.content.html(originalContent);
+					
+					//Auswahl-Nodes anhand Indizes wiederherstellen
+					self._traverseDOMTree(document.getElementById('content_field'), function(node) {
+						if(anchorNodeIndex == 0) {
+							anchorNode = node;
 						}
+						anchorNodeIndex--;
+						if(focusNodeIndex == 0) {
+							focusNode = node;
+						}
+						focusNodeIndex--;
 					});
-				}, 0);												
+					
+					//einzufügenden Text als Paragraph in Textfeld einfügen
+					var insertion = {
+						anchorNode: anchorNode,
+						focusNode: focusNode,
+						anchorOffset: anchorOffset,
+						focusOffset: focusOffset,
+						content: pastedText
+					};
+					self.formatRaw('insert', '', insertion);
+				}, 0);
 			});
 			
-			this._trigger('onCreate', null, this);
+			//Datenobjekt für Callback-Funktionen
+			this.data = {
+				element: self.element,
+				content: self.content,
+				ui: {},
+				logic: {
+					startEditing: function() { self.startEditing() },
+					stopEditing: function(acceptChanges) { self.stopEditing(acceptChanges) },
+					updateUndoStack: function() { self.updateUndoStack() },
+					undo: function() { self.undo() },
+					redo: function() { self.redo() },
+					defineLink: function() { self.defineLink() },
+					insertLink: function(url, title) { self.insertLink(url, title) },
+					format: function(tag) { self.format(tag) },
+					formatWithCSS: function(css) { self.formatWithCSS(css) },
+					clearFormat: function() { self.clearFormat() },
+					clearAll: function() { self.clearAll() }
+				}
+			};
+			
+			this._trigger('onCreate', null, this.data);
 		},
+		//Editiervorgang initialisieren
 		startEditing: function() {
 			if(this.options.editMode == false) {
 				this.options.editMode = true;
 				this.content.attr('contentEditable', 'true');
 				this._initUndoManagement();
-				this._trigger('onStartEditing', null, this);
-				this._trigger('onUndoDisabled', null, this);
-				this._trigger('onRedoDisabled', null, this);
+				this._trigger('onStartEditing', null, this.data);
+				this._trigger('onUndoDisabled', null, this.data);
+				this._trigger('onRedoDisabled', null, this.data);
 			}
 		},
+		//Editiervorgang abschließen (mit oder ohne Speicherung)
 		stopEditing: function(acceptChanges) {
 			if(this.options.editMode) {
 				this.options.editMode = false;
@@ -148,266 +174,556 @@
 						this.undo();
 					}
 				}
-				this._trigger('onStopEditing', null, this);
+				this._trigger('onStopEditing', null, this.data);
 			}
 		},
+		//Undo-Redo-System initialisieren
 		_initUndoManagement: function() {
-			this.options.undoStack = [this.content.html()];
-			this.options.undoIndex = 0;
-			this.options.undoFirstChange = true;
+			var o = this.options;
+			o.undoStack = [this.content.html()];
+			o.undoIndex = 0;
+			o.undoFirstChange = true;
 		},
+		//Arbeitsschritt (aktueller Textfeld-Inhalt) speichern
 		updateUndoStack: function() {
-			//if(this.options.undo_stack[this.options.undo_index] != this.content.html()) {
-			if(this.options.undoFirstChange) {
-				this.options.undoIndex = 1;
-				this.options.undoStack[this.options.undoIndex] = this.content.html();
+			var o = this.options;
+			if(o.undoFirstChange) {
+				o.undoIndex = 1;
+				o.undoStack[o.undoIndex] = this.content.html();
 			}
 			else {
-				while(this.options.undoStack.length > this.options.undoIndex) {
-					this.options.undoStack.pop();
+				while(o.undoStack.length > o.undoIndex) {
+					o.undoStack.pop();
 				}
-				this.options.undoStack.push(this.content.html());
-				this.options.undoIndex++;
+				o.undoStack.push(this.content.html());
+				o.undoIndex++;
 			}
-			this._trigger('onUndoStackUpdate', null, this);
-			//}
+			this._trigger('onUndoStackUpdate', null, this.data);
 		},
+		//Arbeitsschritt rückgängig machen
 		undo: function() {
-			if(this.options.undoIndex > 0) {
-				if(this.options.undoIndex == this.options.undoStack.length) {
-					this.options.undoStack.push(this.content.html());
+			var o = this.options;
+			if(o.undoIndex > 0) {
+				if(o.undoIndex == o.undoStack.length) {
+					o.undoStack.push(this.content.html());
 				}
-				this.options.undoIndex--;
-				this.content.html(this.options.undoStack[this.options.undoIndex]);
-				this._trigger('onUndone', null, this);
-				if(this.options.undoIndex == 0) {
-					this.options.undoFirstChange = true;
-					this._trigger('onUndoDisabled', null, this);
+				o.undoIndex--;
+				this.content.html(o.undoStack[o.undoIndex]);
+				this._trigger('onUndone', null, this.data);
+				if(o.undoIndex == 0) {
+					o.undoFirstChange = true;
+					this._trigger('onUndoDisabled', null, this.data);
 				}
 			}
 		},
+		//Arbeitsschritt wiederholen
 		redo: function() {
-			this.options.undoIndex++;
-			this.content.html(this.options.undoStack[this.options.undoIndex]);
-			this._trigger('onRedone', null, this);
-			if(this.options.undoIndex == this.options.undoStack.length - 1) {
-				this.options.undoStack.pop();
-				this._trigger('onRedoDisabled', null, this);
+			var o = this.options;
+			o.undoIndex++;
+			this.content.html(o.undoStack[o.undoIndex]);
+			this._trigger('onRedone', null, this.data);
+			if(o.undoIndex == o.undoStack.length - 1) {
+				o.undoStack.pop();
+				this._trigger('onRedoDisabled', null, this.data);
 			}
 		},
+		//Linkeingabe starten
 		defineLink: function() {
-			var withNewText = this.options.rangy.getSelection().isCollapsed;
-			this._trigger('onDefineLink', null, { self: this, withNewText : withNewText });
+			this._trigger('onDefineLink', null, this.data);
 		},
-		addLinkWithNewText: function(url, title, text) {
-			this.options.undoFirstChange = false;
-			this.updateUndoStack();
-			this.content.html(this.content.html() + ("<a href=" + url + " title=\"" + title + "\" class=\"link\" >" + text + "</a>"));
-		},
-		addLink: function(url, title) {
-			this.options.undoFirstChange = false;
-			this.updateUndoStack();
-			this.options.rangy.createCssClassApplier("link", {
-					elementTagName: "a",
-					elementProperties: {
-						href: url,
-						title: title
-					}
-				}).toggleSelection();
-		},
-		formatWithCSS: function(cssClass) {
-			this.options.undoFirstChange = false;
-			this.updateUndoStack();
-			cssApplier = this.options.rangy.createCssClassApplier(cssClass);
-			if(cssApplier.isAppliedToSelection()) {
-				cssApplier.undoToSelection();
+		//Auswahl formatieren
+		formatRaw: function(tag, attrs, insertion) {
+			var self = this;
+			var o = this.options;
+			
+			//Auswahldaten aus aktueller Auswahl oder insertion-Objekt (nach Paste-Vorgang -> Einsetzen des neu einzufügenden Textes) beziehen
+			var anchorNode, anchorOffset, focusNode, focusOffset;
+			if(insertion) {
+				tag = 'insert';
+				anchorNode = insertion.anchorNode;
+				anchorOffset = insertion.anchorOffset;
+				focusNode = insertion.focusNode;
+				focusOffset = insertion.focusOffset;
 			}
 			else {
-				cssApplier.applyToSelection();
+				var sel = rangy.getSelection();
+				anchorNode = sel.anchorNode;
+				anchorOffset = sel.anchorOffset;
+				focusNode = sel.focusNode;
+				focusOffset = sel.focusOffset;
+			}
+			
+			//Inline- oder Blockformatierung?
+			var inline = ($.inArray(tag, o.inlineHtmlElements) != -1 || tag == 'clear') && tag != 'insert';
+			
+			//Richtung der Auswahl (vorwärts/rückwärts) bestimmen und standardisieren
+			var node1, node2, offset1, offset2;
+			var foundAnchor = false, foundFocus = false;
+			this._traverseDOMTree(document.getElementById('content_field'), function(node) {
+				if(foundAnchor == false) {
+					if(node == anchorNode) {
+						if(foundFocus == false) {
+							node1 = anchorNode;
+							node2 = focusNode;
+							offset1 = anchorOffset;
+							offset2 = focusOffset;
+						}
+						foundAnchor = true;
+					}
+				}
+				if(foundFocus == false) {
+					if(node == focusNode) {
+						if(foundAnchor == false) {
+							node1 = focusNode;
+							node2 = anchorNode;
+							offset1 = focusOffset;
+							offset2 = anchorOffset;
+						}
+						foundFocus = true;
+					}
+				}
+			});
+			if(anchorNode == focusNode) {
+				if(anchorOffset == focusOffset && tag != 'insert') {
+					offset1 = 0;
+					offset2 = anchorNode.data.length;
+				}
+				else if(anchorOffset < focusOffset) {
+					offset1 = anchorOffset;
+					offset2 = focusOffset;
+				}
+				else {
+					offset1 = focusOffset;
+					offset2 = anchorOffset;
+				}
+			}
+			
+			//liegt die Auswahl außerhalb des Textfeldes, Formatieren abbrechen!
+			if(foundAnchor == false || foundFocus == false) {
+				return;
+			}
+			
+			//Arbeitsschritt speichern
+			if(insertion) {} else {
+				o.undoFirstChange = false;
+				this.updateUndoStack();
+			}
+			
+			
+			var htmlContent = "";
+			var aLevelNode, bLevelNode, cLevelNode;
+			var aLevelNodeTag, bLevelNodeTag, bLevelNodeAttrs;
+			var handled1 = false, handled2 = false;
+			
+			//falls kompletter Textfeld-Inhalt ausgewählt wurde, Auswahl auf ersten und letzten Nachfolger (Textnodes) des Textfeldes reduzieren
+			if(node1 == node2 && node1 == document.getElementById('content_field')) {
+				while(node1.nodeType == 1) {
+					node1 = node1.firstChild;
+				}
+				offset1 = 0;
+				if(tag != 'insert') {
+					while(node2.nodeType == 1) {
+						node2 = node2.lastChild;
+					}
+					offset2 = node2.data.length;
+				}
+				else {
+					node2 = node1;
+					offset2 = 0;
+				}
+			}
+			
+			//alle direkten Nachfolger des Textfeldes (Paragraphen und Headlines -> Level-A-Nodes) durchlaufen
+			this.content.contents().each(function() {
+				aLevelNode = this;
+				aLevelNodeTag = $(aLevelNode).get(0).tagName.toLowerCase();
 				
-				var contentDescNotChildren = this.content.find("*").not(this.content.children());
-				contentDescNotChildren.each(function() {
-					var unnestedElements = new Array();		//Blockelemente; dürfen nicht verschachtelt sein
-					unnestedElements[0]="p";
-					unnestedElements[1]="h1";
-					unnestedElements[2]="h2";
-					unnestedElements[3]="h3";
-					unnestedElements[4]="h4";
-					unnestedElements[5]="h5";
-					unnestedElements[6]="h6";
-					var tempTag = $(this).prop("tagName").toLowerCase();
-					if($.inArray(tempTag, unnestedElements) != -1 ) {
-						cssApplier.undoToSelection();
+				//falls kompletter Level-A-Node ausgewählt wurde, Auswahl auf ersten und letzten Nachfolger (Textnodes) dieses Nodes reduzieren
+				if(node1 == node2 && node1 == aLevelNode) {
+					while(node1.nodeType == 1) {
+						node1 = node1.firstChild;
+					}
+					offset1 = 0;
+					if(tag != 'insert') {
+						while(node2.nodeType == 1) {
+							node2 = node2.lastChild;
+						}
+						offset2 = node2.data.length;
+					}
+					else {
+						node2 = node1;
+						offset2 = 0;
+					}
+				}
+				
+				//öffnendes Tag des Level-A-Nodes schreiben
+				if(inline || handled1 == false || handled2 == true) {
+					htmlContent += '<' + aLevelNodeTag + '>';
+				}
+				
+				//alle direkten Nachfolger des Level-A-Nodes durchlaufen
+				$(aLevelNode).contents().each(function() {
+					
+					bLevelNode = this;
+					
+					//Level-B-Node ist ein Elementnode...
+					if(this.nodeType == 1) {
+						bLevelNodeTag = $(bLevelNode).get(0).tagName.toLowerCase();
+						if(bLevelNodeTag == 'span') {
+							bLevelNodeAttrs = ' class=\"' + $(bLevelNode).attr('class') + '\"';
+						}
+						else if(bLevelNodeTag == 'a') {
+							bLevelNodeAttrs = ' href=\"' + $(bLevelNode).attr('href') + '\" title=\"' + $(bLevelNode).attr('title') + '\"';
+						}
+						else {
+							bLevelNodeAttrs = "";
+						}
+						
+						//Level-C-Node ist ein Textnode!
+						cLevelNode = this.firstChild;
+						
+						//Auswahl ausschließlich innerhalb dieses Level-C-Nodes...
+						if(node1 == node2 && node1 == cLevelNode) {
+							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>'
+									+ Encoder.htmlEncode(cLevelNode.data.substring(0, offset1)) + '</' + bLevelNodeTag + '>';
+							if(inline == false) {
+								htmlContent += '</' + aLevelNodeTag + '>';
+							}
+							htmlContent += '<' + tag + attrs + '>' + Encoder.htmlEncode(cLevelNode.data.substring(offset1, offset2)) + '</' + tag + '>';
+							if(inline == false) {
+								htmlContent += '<' + aLevelNodeTag + '>';
+							}
+							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>' + Encoder.htmlEncode(cLevelNode.data.substring(offset2, cLevelNode.data.length))
+									+ '</' + bLevelNodeTag + '>';
+							handled1 = handled2 = true;
+						}
+						//Auswahl beginnt auf diesem Level-C-Node...
+						else if(node1 == cLevelNode) {
+							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>'
+									+ Encoder.htmlEncode(cLevelNode.data.substring(0, offset1)) + '</' + bLevelNodeTag + '>';
+							if(inline == false) {
+								htmlContent += '</' + aLevelNodeTag + '>';
+							}
+							htmlContent += '<' + tag + attrs + '>'
+									+ Encoder.htmlEncode(cLevelNode.data.substring(offset1, cLevelNode.data.length));
+							if(inline && bLevelNode == aLevelNode.lastChild) {
+								htmlContent += '</' + tag + '>';
+							}
+							handled1 = true;
+						}
+						//Auswahl endet auf diesem Level-C-Node...
+						else if(node2 == cLevelNode) {
+							if(inline && bLevelNode == aLevelNode.firstChild) {
+								htmlContent += '<' + tag + attrs + '>';
+							}
+							htmlContent += Encoder.htmlEncode(cLevelNode.data.substring(0, offset2)) + '</' + tag + '>';
+							if(inline == false) {
+								htmlContent += '<' + aLevelNodeTag + '>';
+							}
+							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>'
+									+ Encoder.htmlEncode(cLevelNode.data.substring(offset2, cLevelNode.data.length)) + '</' + bLevelNodeTag + '>';
+							handled2 = true;
+						}
+						//Auswahl geht komplett über diesen Level-C-Node...
+						else if(handled1 == true && handled2 == false) {
+							if(inline && bLevelNode == aLevelNode.firstChild) {
+								htmlContent += '<' + tag + attrs + '>';
+							}
+							htmlContent += Encoder.htmlEncode(cLevelNode.data);
+							if(inline && bLevelNode == aLevelNode.lastChild) {
+								htmlContent += '</' + tag + '>';
+							}
+						}
+						//Auswahl berührt diesen Level-C-Node nicht...
+						else {
+							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>' + Encoder.htmlEncode(cLevelNode.data) + '</' + bLevelNodeTag + '>';
+						}
+					}
+					//Level-B-Node ist ein Textnode...
+					else if(this.nodeType == 3) {
+						//Auswahl ausschließlich innerhalb dieses Level-B-Nodes...
+						if(node1 == node2 && node1 == bLevelNode) {
+							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(0, offset1));
+							if(inline == false) {
+								htmlContent += '</' + aLevelNodeTag + '>';
+							}
+							htmlContent += '<' + tag + attrs + '>' + Encoder.htmlEncode(bLevelNode.data.substring(offset1, offset2)) + '</' + tag + '>';
+							if(inline == false) {
+								htmlContent += '<' + aLevelNodeTag + '>';
+							}
+							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(offset2, bLevelNode.data.length));
+							handled1 = handled2 = true;
+						}
+						//Auswahl beginnt auf diesem Level-B-Node...
+						else if(node1 == bLevelNode) {
+							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(0, offset1));
+							if(inline == false) {
+								htmlContent += '</' + aLevelNodeTag + '>';
+							}
+							htmlContent += '<' + tag + attrs + '>' + Encoder.htmlEncode(bLevelNode.data.substring(offset1, bLevelNode.data.length));
+							if(inline && bLevelNode == aLevelNode.lastChild) {
+								htmlContent += '</' + tag + '>';
+							}
+							handled1 = true;
+						}
+						//Auswahl endet auf diesem Level-B-Node...
+						else if(node2 == bLevelNode) {
+							if(inline && bLevelNode == aLevelNode.firstChild) {
+								htmlContent += '<' + tag + attrs + '>';
+							}
+							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(0, offset2)) + '</' + tag + '>';
+							if(inline == false) {
+								htmlContent += '<' + aLevelNodeTag + '>';
+							}
+							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(offset2, bLevelNode.data.length));
+							handled2 = true;
+						}
+						//Auswahl geht komplett über diesen Level-B-Node...
+						else if(handled1 == true && handled2 == false) {
+							if(inline && bLevelNode == aLevelNode.firstChild) {
+								htmlContent += '<' + tag + attrs + '>';
+							}
+							htmlContent += Encoder.htmlEncode(bLevelNode.data);
+							if(inline && bLevelNode == aLevelNode.lastChild) {
+								htmlContent += '</' + tag + '>';
+							}
+						}
+						//Auswahl berührt diesen Level-B-Node nicht...
+						else {
+							htmlContent += Encoder.htmlEncode(bLevelNode.data);
+						}
 					}
 				});
+				
+				//schließendes Tag des Level-A-Nodes schreiben
+				if(inline || handled1 == false || handled2 == true) {
+					htmlContent += '</' + aLevelNodeTag + '>';
+				}
+				
+			});
+			
+			//Paste-Text einsetzen
+			if(insertion) {
+				htmlContent = htmlContent.replace(/<insert>[^<]*<\/insert>/i, '<p>' + Encoder.htmlEncode(insertion.content) + '</p>');
+				htmlContent = htmlContent.replace(/(&nbsp; *)+/gi, '&nbsp;');
+			}
+			
+			//leere Nodes und <br>-Tags entfernen
+			htmlContent = htmlContent.replace(/<[^\/>]*><\/[^>]*>/gi, '');
+			htmlContent = htmlContent.replace(/<br[^>]>/gi, '&nbsp;');
+			
+			//zu löschende Formatierungen entfernen
+			htmlContent = htmlContent.replace(/<h([1-6])>([^<]*)<clear>([^<]*)<\/clear>([^<]*)<\/h[1-6]>/gi, '<p>$2$3$4</p>');
+			htmlContent = htmlContent.replace(/<clear>([^<]*)<\/clear>/gi, '$1');
+			
+			//Textfeld mit neuem Inhalt füllen
+			this.content.html(htmlContent);
+			
+			//Auswahl aufheben
+			sel.collapseToEnd();
+			
+		},
+		//alle Nodes des Textfeldes durchlaufen
+		_traverseDOMTree: function(node, action) {
+			action(node);
+			var childs = node.childNodes.length;
+			for(var i = 0; i < childs; i++) {
+				this._traverseDOMTree(node.childNodes[i], action);
 			}
 		},
-		clean: function() {
+		//einfach formatieren
+		format: function(tag) {
+			this.formatRaw(tag, '');
+		},
+		//mit CSS-Klasse formatieren
+		formatWithCSS: function(css) {
+			this.formatRaw('span', ' class=\"' + css + '\"');
+		},
+		//Formatierung entfernen
+		clearFormat: function() {
+			this.formatRaw('clear', '');
+		},
+		//alle Formatierungen entfernen
+		clearAll: function() {
 			this.options.undoFirstChange = false;
 			this.updateUndoStack();
-			this.content.html(this.content.text());
+			this.content.html('<p>' + this.content.text() + '</p>');
+		},
+		//Auswahl als Link formatieren
+		insertLink: function(url, title) {
+			this.formatRaw('a', ' href=\"' + url + '\" title=\"' + title + '\"');
 		},
 		options: {
-			editMode: false,
-			styles: [],
-			undoStack: [],
-			undoIndex: 0,
-			undoFirstChange: true,
-			window: null,
-			rangy: null,
+			editMode: false,										//Editiermodus ein/aus
+			styles: [],												//CSS-Klassennamen
+			undoStack: [],											//Stack für Undo-Redo-System
+			undoIndex: 0,											//aktuelle Position im Undo-Redo-Stack
+			undoFirstChange: true,									//allererste Änderung am Text?
+			inlineHtmlElements:										//HTML-Elemente, die inline eingesetzt werden
+				['em', 'strong', 'span', 'a'],
+			blockHtmlElements:										//HTML-Elemente, die als Blöcke eingesetzt werden
+				['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'],
+			
 			
 			//########## CALLBACKS -> werden vom Anwender überschrieben:
 			
 			//wird bei Erzeugen des Widgets aufgerufen
-			onCreate: function(event, self) {
+			onCreate: function(event, data) {
 				var headerHeight = 30;
 				var sidebarWidth = 100;
 				var buttonWidth = 60;
 				var buttonMargin = 3;
 				var borderWidth = 1;
-				var width = self.element.width();
-				var height = self.element.height();
+				var width = data.element.width();
+				var height = data.element.height();
 				var contentHeight = height - (2*borderWidth) - headerHeight;
 				var contentWidth = width - (2*borderWidth) - sidebarWidth;
 				var buttonStyle = { 'width':''+buttonWidth+'px', 'margin':''+buttonMargin+'px' };
-				self.header = $("<div>").attr("id", "header")
+				data.content.css({'border-style':'dashed','border-width':''+borderWidth+'px','border-color':'#111111', 'width':''+contentWidth+'px', 'height':''+contentHeight+'px', 'position': 'absolute', 'top':''+headerHeight+'px', 'left':'0px', 'background-color': '#EEEEFF', 'overflow': 'auto'})
+						.click(function() {
+							data.logic.startEditing();
+						});
+				data.ui.header = $("<div>").attr("id", "header")
 						.css({'width':''+width+'px', 'height':''+headerHeight+'px', 'position': 'absolute', 'top':'0px', 'left':'0px', 'background-color': '#FFFFFF'})
-						.appendTo(self.element);
-				self.content.css({'border-style':'dashed','border-width':''+borderWidth+'px','border-color':'#111111', 'width':''+contentWidth+'px', 'height':''+contentHeight+'px', 'position': 'absolute', 'top':''+headerHeight+'px', 'left':'0px', 'background-color': '#EEEEFF'})
-						.click(function() {
-							self.startEditing();
-						});
-				self.sidebar = $("<div>").attr("id", "sidebar")
+						.appendTo(data.element);
+				data.ui.sidebar = $("<div>").attr("id", "sidebar")
 						.css({'width':''+sidebarWidth+'px', 'height':''+(height-headerHeight)+'px', 'position': 'absolute', 'top':''+headerHeight+'px', 'left':''+(contentWidth+2*borderWidth)+'px', 'background-color': '#FFFFFF'})
-						.appendTo(self.element);
-				self.acceptButton = $("<input>").attr("id", "accept_changes_btn").attr("type", "button").attr("value", "Accept")
+						.appendTo(data.element);
+				data.ui.acceptButton = $("<input>").attr("id", "accept_changes_btn").attr("type", "button").attr("value", "Accept")
 						.css(buttonStyle).css({'background-color':'#11EE11', 'border-color':'#22EE22'})
-						.appendTo(self.header)
+						.appendTo(data.ui.header)
 						.click(function() {
-							self.stopEditing(true);
+							data.logic.stopEditing(true);
 						});
-				self.cancelButton = $("<input>").attr("id", "cancel_changes_btn").attr("type", "button").attr("value", "Cancel")
+				data.ui.cancelButton = $("<input>").attr("id", "cancel_changes_btn").attr("type", "button").attr("value", "Cancel")
 						.css(buttonStyle).css({'background-color':'#EE1111', 'border-color':'#EE2222'})
-						.appendTo(self.header)
+						.appendTo(data.ui.header)
 						.click(function() {
-							self.stopEditing(false);
+							data.logic.stopEditing(false);
 						});
-				self.undoButton = $("<input>").attr("id", "undo_btn").attr("type", "button").attr("value", "Undo")
+				data.ui.undoButton = $("<input>").attr("id", "undo_btn").attr("type", "button").attr("value", "Undo")
 						.css(buttonStyle).css({'background-color':'#EEEEEE'})
-						.appendTo(self.header)
+						.appendTo(data.ui.header)
 						.click(function() {
-							self.undo();
+							data.logic.undo();
 						});
-				self.redoButton = $("<input>").attr("id", "redo_btn").attr("type", "button").attr("value", "Redo")
+				data.ui.redoButton = $("<input>").attr("id", "redo_btn").attr("type", "button").attr("value", "Redo")
 						.css(buttonStyle).css({'background-color':'#EEEEEE'})
-						.appendTo(self.header)
+						.appendTo(data.ui.header)
 						.click(function() {
-							self.redo();
+							data.logic.redo();
 						});
-				self.linkButton = $("<input>").attr("id", "link_btn").attr("type", "button").attr("value", "Link...")
+				data.ui.linkButton = $("<input>").attr("id", "link_btn").attr("type", "button").attr("value", "Link...")
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
-						.appendTo(self.sidebar)
+						.appendTo(data.ui.sidebar)
 						.click(function() {
-							self.defineLink();
+							data.logic.defineLink();
 						});
-				self.cleanButton = $("<input>").attr("id", "clean_btn").attr("type", "button").attr("value", "Clean Up") //Alle HTML-Formatierungen löschen
+				data.ui.clearAllButton = $("<input>").attr("id", "clear_all_btn").attr("type", "button").attr("value", "Clear all")
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
-						.appendTo(self.sidebar)
+						.appendTo(data.ui.sidebar)
 						.click(function() {
-							self.clean();
+							data.logic.clearAll();
 						});
-				self.formatButton1 = $("<input>").attr("id", "format_btn_1").attr("type", "button").attr("value", "Bold")
+				data.ui.formatButton1 = $("<input>").attr("id", "format_btn_1").attr("type", "button").attr("value", "h1")
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
-						.appendTo(self.sidebar)
+						.appendTo(data.ui.sidebar)
 						.click(function() {
-							self.formatWithCSS('bold');
+							data.logic.format('h1');
 						});
-				self.formatButton2 = $("<input>").attr("id", "format_btn_2").attr("type", "button").attr("value", "Red")
+				data.ui.formatButton2 = $("<input>").attr("id", "format_btn_2").attr("type", "button").attr("value", "em")
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
-						.appendTo(self.sidebar)
+						.appendTo(data.ui.sidebar)
 						.click(function() {
-							self.formatWithCSS('red');
+							data.logic.format('em');
 						});
-				self.formatButton3 = $("<input>").attr("id", "format_btn_3").attr("type", "button").attr("value", "Headline")
+				data.ui.formatButton3 = $("<input>").attr("id", "format_btn_3").attr("type", "button").attr("value", "strong")
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
-						.appendTo(self.sidebar)
+						.appendTo(data.ui.sidebar)
 						.click(function() {
-							self.formatWithCSS('headline');
+							data.logic.format('strong');
 						});
-				self.acceptButton.hide();
-				self.cancelButton.hide();
-				self.undoButton.hide();
-				self.redoButton.hide();
-				self.linkButton.hide();
-				self.cleanButton.hide();
-				self.formatButton1.hide();
-				self.formatButton2.hide();
-				self.formatButton3.hide();
+				data.ui.formatButton4 = $("<input>").attr("id", "format_btn_4").attr("type", "button").attr("value", "red")
+						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
+						.appendTo(data.ui.sidebar)
+						.click(function() {
+							data.logic.formatWithCSS('red');
+						});
+				data.ui.clearFormatButton = $("<input>").attr("id", "clear_format_btn").attr("type", "button").attr("value", "Clear")
+						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
+						.appendTo(data.ui.sidebar)
+						.click(function() {
+							data.logic.clearFormat();
+						});
+				data.ui.acceptButton.hide();
+				data.ui.cancelButton.hide();
+				data.ui.undoButton.hide();
+				data.ui.redoButton.hide();
+				data.ui.linkButton.hide();
+				data.ui.clearAllButton.hide();
+				data.ui.formatButton1.hide();
+				data.ui.formatButton2.hide();
+				data.ui.formatButton3.hide();
+				data.ui.formatButton4.hide();
+				data.ui.clearFormatButton.hide();
 			},
 			//wird bei Starten des Editiervorgangs aufgerufen
-			onStartEditing: function(event, self) {
-				self.acceptButton.fadeIn(1000);
-				self.cancelButton.fadeIn(1000);
-				self.linkButton.fadeIn(1000);
-				self.cleanButton.fadeIn(1000);
-				self.undoButton.fadeIn(1000);
-				self.redoButton.fadeIn(1000);
-				self.formatButton1.fadeIn(1000);
-				self.formatButton2.fadeIn(1000);
-				self.formatButton3.fadeIn(1000);
-				self.content.css({'background-color' : '#FFFFFF'});
+			onStartEditing: function(event, data) {
+				data.ui.acceptButton.fadeIn(1000);
+				data.ui.cancelButton.fadeIn(1000);
+				data.ui.linkButton.fadeIn(1000);
+				data.ui.clearAllButton.fadeIn(1000);
+				data.ui.undoButton.fadeIn(1000);
+				data.ui.redoButton.fadeIn(1000);
+				data.ui.formatButton1.fadeIn(1000);
+				data.ui.formatButton2.fadeIn(1000);
+				data.ui.formatButton3.fadeIn(1000);
+				data.ui.formatButton4.fadeIn(1000);
+				data.ui.clearFormatButton.fadeIn(1000);
+				data.content.css({'background-color' : '#FFFFFF'});
 			},
 			//wird bei Beenden des Editiervorgangs aufgerufen
-			onStopEditing: function(event, self) {
-				self.acceptButton.fadeOut();
-				self.cancelButton.fadeOut();
-				self.undoButton.fadeOut();
-				self.redoButton.fadeOut();
-				self.linkButton.fadeOut();
-				self.cleanButton.fadeOut();
-				self.formatButton1.fadeOut();
-				self.formatButton2.fadeOut();
-				self.formatButton3.fadeOut();
-				self.content.css({'background-color' : '#EEEEFF'});
+			onStopEditing: function(event, data) {
+				data.ui.acceptButton.fadeOut();
+				data.ui.cancelButton.fadeOut();
+				data.ui.undoButton.fadeOut();
+				data.ui.redoButton.fadeOut();
+				data.ui.linkButton.fadeOut();
+				data.ui.clearAllButton.fadeOut();
+				data.ui.formatButton1.fadeOut();
+				data.ui.formatButton2.fadeOut();
+				data.ui.formatButton3.fadeOut();
+				data.ui.formatButton4.fadeOut();
+				data.ui.clearFormatButton.fadeOut();
+				data.content.css({'background-color' : '#EEEEFF'});
 			},
 			//wird nach einer Undo-Operation aufgerufen
-			onUndone: function(event, self) {
-				self.redoButton.removeAttr('disabled');
+			onUndone: function(event, data) {
+				data.ui.redoButton.removeAttr('disabled');
 			},
 			//wird nach der letztmöglichen Undo-Operation aufgerufen
-			onUndoDisabled: function(event, self) {
-				self.undoButton.attr('disabled', 'true');
+			onUndoDisabled: function(event, data) {
+				data.ui.undoButton.attr('disabled', 'true');
 			},
 			//wird nach einer Redo-Operation aufgerufen
-			onRedone: function(event, self) {
-				self.undoButton.removeAttr('disabled');
+			onRedone: function(event, data) {
+				data.ui.undoButton.removeAttr('disabled');
 			},
 			//wird nach der letztmöglichen Redo-Operation aufgerufen
-			onRedoDisabled: function(event, self) {
-				self.redoButton.attr('disabled', 'true');
+			onRedoDisabled: function(event, data) {
+				data.ui.redoButton.attr('disabled', 'true');
 			},
-			//wird bei Änderung des Textes (und somit Änderung des Undo-Stacks) aufgerufen
-			onUndoStackUpdate: function(event, self) {
-				self.undoButton.removeAttr('disabled');
-				self.redoButton.attr('disabled', 'true');
+			//wird bei Änderung des Textes (und somit Änderung des Undo-Redo-Stacks) aufgerufen
+			onUndoStackUpdate: function(event, data) {
+				data.ui.undoButton.removeAttr('disabled');
+				data.ui.redoButton.attr('disabled', 'true');
 			},
-			//wird aufgerufen, sobald ein Link eingefügt werden möchte
+			//wird aufgerufen, sobald ein Link eingegeben werden soll
 			onDefineLink: function(event, data) {
-				var self = data.self;
-				var withNewText = data.withNewText;
-				
-				var url = self.options.window.prompt("URL:", "http://");
+				var url = window.prompt("URL:", "http://");
 				if(url != null) {
-					var title = self.options.window.prompt("Title (shown while hovering):", url);
-					if(withNewText) {
-						var text = self.options.window.prompt("Shown text:", title);
-						if(text != null) {
-							self.addLinkWithNewText(url, title, text);
-						}
-					}
-					else {
-						self.addLink(url, title);
-					}
+					var title = window.prompt("Title (shown while hovering):", url);
+					data.logic.insertLink(url, title);
 				}
 			}
 		}

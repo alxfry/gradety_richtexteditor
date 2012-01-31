@@ -3,12 +3,11 @@
 		<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.0/jquery.min.js"></script>
 		<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.8.16/jquery-ui.min.js"></script>
 		<script type="text/javascript" src="rangy-core.js"></script>
-		<script type="text/javascript" src="rangy-cssclassapplier.js"></script>
+		<script type="text/javascript" src="encoder.js"></script>
 		<script type="text/javascript" src="jquery.tf.gradety_richtext.js"></script>
 		<script type="text/javascript">
 			$(document).ready(function () {
 				$('#container').gradety_rt();
-				$('#container').gradety_rt({ window: window, rangy: rangy });
 				//$('#container').gradety_rt({ onStartEditing: function(evt, widget) { alert("HALLO") } });
 				$('#htmlButton').click(function() {
 					$('#containerContentAsHTML').text($('#content_field').html());
@@ -22,14 +21,11 @@
 				width: 800px;
 				height: 480px;
 			}
-			.bold {
-				font-weight: bold;
+			#container p {
+				margin: 0;
 			}
 			.red {
 				color: red;
-			}
-			.headline {
-				font-size: 40;
 			}
 		</style>
 	</head>
