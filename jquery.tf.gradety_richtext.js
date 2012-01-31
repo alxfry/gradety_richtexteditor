@@ -509,7 +509,7 @@
 			}
 			
 			//leere Nodes und <br>-Tags entfernen
-			htmlContent = htmlContent.replace(/<[^\/>]*><\/[^>]*>/gi, '');
+			htmlContent = htmlContent.replace(/<[a-z]+[^>]*><\/[a-z]+[^>]*>/gi, '');
 			htmlContent = htmlContent.replace(/<br[^>]>/gi, '&nbsp;');
 			
 			//zu löschende Formatierungen entfernen
