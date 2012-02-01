@@ -21,11 +21,11 @@
 						event.preventDefault();
 						self.redo();
 					}
-					else if(event.which == 88) {			//STRG-X -> Arbeitsschritt speichern vor Ausschneiden
-						o.undoFirstChange = false;
-						self.updateUndoStack();
-					}
-					else if(event.which != 65 && event.which != 67 && event.which != 86) {		//STRG-A, STRG-C, STRG-V -> einzige Shortcuts mit Standardbelegung
+					/*else if(event.which == 86) {			//STRG-V -> Paste
+						self.content.trigger('paste');
+						event.preventDefault();
+					}*/
+					else if(event.which != 65 && event.which != 67 && event.which != 86 && event.which != 88) {		//STRG-A, STRG-C, STRG-V, STRG-X -> einzige Shortcuts mit Standardbelegung
 						event.preventDefault();
 					}
 				}
@@ -38,24 +38,13 @@
 					];
 					//Arbeitsschritt speichern, bevor einer der obigen Keys eingegeben wird
 					if($.inArray(event.which, keys) != -1) {
-						o.undoFirstChange = false;
-						self.updateUndoStack();
+						self.updateUndoStack(false);
 					}
-					else if(o.undoFirstChange && event.which != 16 && event.which != 20) {
-						self.updateUndoStack();
+					else if(self.undoSystem.firstChange && event.which != 16 && event.which != 20) {
+						self.updateUndoStack(true);
 					}
 					setTimeout(function() {
-						//Leeres Textfeld mit Standardtext füllen
-						if($.trim(self.content.text()) == '') {
-							self.content.html('<p>Enter text here...</p>');
-						}
-						//automatisch eingefügte <br>-Tags ersetzen/entfernen
-						else if(event.which == 13) {
-							self.content.find('br').replaceWith('&nbsp;');
-						}
-						else {
-							self.content.find('br').replaceWith(' ');
-						}
+						self._checkOnEmptiness(event.which);
 					}, 0);
 				}
 			});
@@ -63,8 +52,7 @@
 			//Paste-Event
 			this.content.bind('paste', function(event) {
 				//Arbeitsschritt speichern
-				o.undoFirstChange = false;
-				self.updateUndoStack();
+				self.updateUndoStack(false);
 				
 				//Originaltext und Auswahl speichern
 				var originalContent = self.content.html();
@@ -101,8 +89,8 @@
 				self.content.empty();
 				
 				setTimeout(function() {
-					//nach Paste: Inhalt des Textfeldes = neu eingefügter Text (plain!)
-					var pastedText = self.content.text();
+					//nach Paste: Inhalt des Textfeldes = neu eingefügter Text
+					var pastedText = self.content.html();
 					
 					//Zustand vor Paste wiederherstellen
 					self.content.html(originalContent);
@@ -128,7 +116,15 @@
 						content: pastedText
 					};
 					self.formatRaw('insert', '', insertion);
+					self._checkOnEmptiness();
 				}, 0);
+			});
+			
+			//Cut-Event
+			this.content.bind('cut', function(event) {
+				//Arbeitsschritt speichern
+				self.updateUndoStack(false);
+				self._checkOnEmptiness();
 			});
 			
 			//Datenobjekt für Callback-Funktionen
@@ -139,7 +135,7 @@
 				logic: {
 					startEditing: function() { self.startEditing() },
 					stopEditing: function(acceptChanges) { self.stopEditing(acceptChanges) },
-					updateUndoStack: function() { self.updateUndoStack() },
+					updateUndoStack: function(firstChange) { self.updateUndoStack(firstChange) },
 					undo: function() { self.undo() },
 					redo: function() { self.redo() },
 					defineLink: function() { self.defineLink() },
@@ -155,8 +151,8 @@
 		},
 		//Editiervorgang initialisieren
 		startEditing: function() {
-			if(this.options.editMode == false) {
-				this.options.editMode = true;
+			if(this.editMode == false) {
+				this.editMode = true;
 				this.content.attr('contentEditable', 'true');
 				this._initUndoManagement();
 				this._trigger('onStartEditing', null, this.data);
@@ -166,64 +162,95 @@
 		},
 		//Editiervorgang abschließen (mit oder ohne Speicherung)
 		stopEditing: function(acceptChanges) {
-			if(this.options.editMode) {
-				this.options.editMode = false;
+			if(this.editMode) {
+				this.editMode = false;
 				this.content.attr('contentEditable', 'false');
 				if(acceptChanges == false) {
-					while(this.options.undoIndex > 0) {
+					while(this.undoSystem.index > 0 && this.undoSystem.stack[this.undoSystem.index - 1] != null) {
 						this.undo();
 					}
 				}
 				this._trigger('onStopEditing', null, this.data);
 			}
 		},
+		//leeres Textfeld bei Bedarf mit Standardtext füllen
+		_checkOnEmptiness: function(input) {
+			var self = this;
+			setTimeout(function() {
+				if(input == 13) {
+					self.content.find('br').replaceWith('&nbsp;');
+				}
+				else {
+					self.content.find('br').replaceWith(' ');
+				}
+				if($.trim(self.content.text()) == '') {
+					self.content.html('<p>' + self.options.defaultText + '</p>');
+					var range = rangy.createRange();
+					var node = document.getElementById('content_field').firstChild.firstChild;
+					range.setStart(node, 0);
+					range.setEnd(node, node.data.length);
+					rangy.getSelection().setSingleRange(range);
+				}
+			}, 0);
+		},
 		//Undo-Redo-System initialisieren
 		_initUndoManagement: function() {
-			var o = this.options;
-			o.undoStack = [this.content.html()];
-			o.undoIndex = 0;
-			o.undoFirstChange = true;
+			this.undoSystem.stack = [this.content.html()];
+			this.undoSystem.index = 0;
+			this.undoSystem.firstChange = true;
+			this.undoSystem.indexOfFirstChange = 0;
 		},
 		//Arbeitsschritt (aktueller Textfeld-Inhalt) speichern
-		updateUndoStack: function() {
-			var o = this.options;
-			if(o.undoFirstChange) {
-				o.undoIndex = 1;
-				o.undoStack[o.undoIndex] = this.content.html();
+		updateUndoStack: function(firstChange) {
+			var u = this.undoSystem;
+			if(firstChange == false) {
+				u.firstChange = false;
+			}
+			if(u.firstChange) {
+				u.index = u.indexOfFirstChange + 1;
+				u.stack[u.index] = this.content.html();
+				while(u.stack.length > u.index) {
+					u.stack.pop();
+				}
 			}
 			else {
-				while(o.undoStack.length > o.undoIndex) {
-					o.undoStack.pop();
+				while(u.stack.length > u.index) {
+					u.stack.pop();
 				}
-				o.undoStack.push(this.content.html());
-				o.undoIndex++;
+				u.stack.push(this.content.html());
+				u.index++;
+				if(u.index > this.options.undoStackSize) {
+					u.stack[u.index - this.options.undoStackSize] = null;
+				}
 			}
+			this._trigger('onRedoDisabled', null, this.data);
 			this._trigger('onUndoStackUpdate', null, this.data);
 		},
 		//Arbeitsschritt rückgängig machen
 		undo: function() {
-			var o = this.options;
-			if(o.undoIndex > 0) {
-				if(o.undoIndex == o.undoStack.length) {
-					o.undoStack.push(this.content.html());
+			var u = this.undoSystem;
+			if(u.index > 0) {
+				if(u.index == u.stack.length) {
+					u.stack.push(this.content.html());
 				}
-				o.undoIndex--;
-				this.content.html(o.undoStack[o.undoIndex]);
+				u.index--;
+				this.content.html(u.stack[u.index]);
 				this._trigger('onUndone', null, this.data);
-				if(o.undoIndex == 0) {
-					o.undoFirstChange = true;
+				if(u.index == 0 || u.stack[u.index - 1] == null) {
+					u.firstChange = true;
+					u.indexOfFirstChange = u.index;
 					this._trigger('onUndoDisabled', null, this.data);
 				}
 			}
 		},
 		//Arbeitsschritt wiederholen
 		redo: function() {
-			var o = this.options;
-			o.undoIndex++;
-			this.content.html(o.undoStack[o.undoIndex]);
+			var u = this.undoSystem;
+			u.index++;
+			this.content.html(u.stack[u.index]);
 			this._trigger('onRedone', null, this.data);
-			if(o.undoIndex == o.undoStack.length - 1) {
-				o.undoStack.pop();
+			if(u.index == u.stack.length - 1) {
+				u.stack.pop();
 				this._trigger('onRedoDisabled', null, this.data);
 			}
 		},
@@ -236,10 +263,13 @@
 			var self = this;
 			var o = this.options;
 			
+			this.content.focus();
+			
 			//Auswahldaten aus aktueller Auswahl oder insertion-Objekt (nach Paste-Vorgang -> Einsetzen des neu einzufügenden Textes) beziehen
 			var anchorNode, anchorOffset, focusNode, focusOffset;
 			if(insertion) {
 				tag = 'insert';
+				attrs = '';
 				anchorNode = insertion.anchorNode;
 				anchorOffset = insertion.anchorOffset;
 				focusNode = insertion.focusNode;
@@ -305,8 +335,7 @@
 			
 			//Arbeitsschritt speichern
 			if(insertion) {} else {
-				o.undoFirstChange = false;
-				this.updateUndoStack();
+				this.updateUndoStack(false);
 			}
 			
 			
@@ -504,13 +533,19 @@
 			
 			//Paste-Text einsetzen
 			if(insertion) {
-				htmlContent = htmlContent.replace(/<insert>[^<]*<\/insert>/i, '<p>' + Encoder.htmlEncode(insertion.content) + '</p>');
-				htmlContent = htmlContent.replace(/(&nbsp; *)+/gi, '&nbsp;');
+				var rawInsertion = insertion.content.replace(/<br[^>]*>/gi, '<-br->');
+				rawInsertion = rawInsertion.replace(/<\/?[^-][a-z]*[^>]*>/gi, '');
+				var linesToInsert = rawInsertion.split('<-br->');
+				var formattedInsertion = '';
+				for(var i = 0; i < linesToInsert.length; i++) {
+					formattedInsertion += '<p>' + Encoder.htmlEncode(linesToInsert[i]) + '</p>';
+				}
+				htmlContent = htmlContent.replace(/<insert>[^<]*<\/insert>/i, formattedInsertion);
 			}
 			
 			//leere Nodes und <br>-Tags entfernen
 			htmlContent = htmlContent.replace(/<[a-z]+[^>]*><\/[a-z]+[^>]*>/gi, '');
-			htmlContent = htmlContent.replace(/<br[^>]>/gi, '&nbsp;');
+			htmlContent = htmlContent.replace(/<br[^>]*>/gi, '&nbsp;');
 			
 			//zu löschende Formatierungen entfernen
 			htmlContent = htmlContent.replace(/<h([1-6])>([^<]*)<clear>([^<]*)<\/clear>([^<]*)<\/h[1-6]>/gi, '<p>$2$3$4</p>');
@@ -520,7 +555,7 @@
 			this.content.html(htmlContent);
 			
 			//Auswahl aufheben
-			sel.collapseToEnd();
+			sel.setSingleRange(null);
 			
 		},
 		//alle Nodes des Textfeldes durchlaufen
@@ -545,25 +580,28 @@
 		},
 		//alle Formatierungen entfernen
 		clearAll: function() {
-			this.options.undoFirstChange = false;
-			this.updateUndoStack();
+			this.updateUndoStack(false);
 			this.content.html('<p>' + this.content.text() + '</p>');
 		},
 		//Auswahl als Link formatieren
 		insertLink: function(url, title) {
 			this.formatRaw('a', ' href=\"' + url + '\" title=\"' + title + '\"');
 		},
+		undoSystem: {
+			stack: [],
+			index: 0,
+			firstChange: true,
+			indexOfLastFirstChange: 0
+		},
+		editMode: false,
 		options: {
-			editMode: false,										//Editiermodus ein/aus
 			styles: [],												//CSS-Klassennamen
-			undoStack: [],											//Stack für Undo-Redo-System
-			undoIndex: 0,											//aktuelle Position im Undo-Redo-Stack
-			undoFirstChange: true,									//allererste Änderung am Text?
+			undoStackSize: 200,										//Größe des Undo-Stacks (max. Anzahl an Undo-Operationen)
 			inlineHtmlElements:										//HTML-Elemente, die inline eingesetzt werden
 				['em', 'strong', 'span', 'a'],
 			blockHtmlElements:										//HTML-Elemente, die als Blöcke eingesetzt werden
 				['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'],
-			
+			defaultText: 'Enter text here...',						//Standardtext bei leerem Textfeld
 			
 			//########## CALLBACKS -> werden vom Anwender überschrieben:
 			
