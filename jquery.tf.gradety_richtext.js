@@ -21,11 +21,10 @@
 						event.preventDefault();
 						self.redo();
 					}
-					/*else if(event.which == 86) {			//STRG-V -> Paste
+					else if(event.which == 86) {			//STRG-V -> Paste
 						self.content.trigger('paste');
-						event.preventDefault();
-					}*/
-					else if(event.which != 65 && event.which != 67 && event.which != 86 && event.which != 88) {		//STRG-A, STRG-C, STRG-V, STRG-X -> einzige Shortcuts mit Standardbelegung
+					}
+					else if(event.which != 65 && event.which != 67 && event.which != 88) {			//STRG-A, STRG-C, STRG-V, STRG-X -> einzige Shortcuts mit Standardbelegung
 						event.preventDefault();
 					}
 				}
@@ -43,80 +42,25 @@
 					else if(self.undoSystem.firstChange && event.which != 16 && event.which != 20) {
 						self.updateUndoStack(true);
 					}
-					setTimeout(function() {
-						self._checkOnEmptiness(event.which);
-					}, 0);
+					self._checkOnEmptiness();
 				}
 			});
 			
 			//Paste-Event
 			this.content.bind('paste', function(event) {
+				if(self.pasteLock) {
+					return;
+				}
+				
+				self.pasteLock = true;
+				
 				//Arbeitsschritt speichern
 				self.updateUndoStack(false);
 				
-				//Originaltext und Auswahl speichern
-				var originalContent = self.content.html();
-				var sel = rangy.getSelection();
-				var anchorNode = sel.anchorNode;
-				var focusNode = sel.focusNode;
-				
-				//Index der Auswahl-Nodes speichern (da Nodes als Objekte gelöscht werden)
-				var anchorNodeIndex = 0, focusNodeIndex = 0;
-				var anchorNodeFound = false, focusNodeFound = false;
-				self._traverseDOMTree(document.getElementById('content_field'), function(node) {
-					if(anchorNodeFound == false) {
-						if(node != anchorNode) {
-							anchorNodeIndex++;
-						}
-						else {
-							anchorNodeFound = true;
-						}
-					}
-					if(focusNodeFound == false) {
-						if(node != focusNode) {
-							focusNodeIndex++;
-						}
-						else {
-							focusNodeFound = true;
-						}
-					}
-				});
-				
-				var anchorOffset = sel.anchorOffset;
-				var focusOffset = sel.focusOffset;
-				
-				//Textfeld leeren
-				self.content.empty();
-				
 				setTimeout(function() {
-					//nach Paste: Inhalt des Textfeldes = neu eingefügter Text
-					var pastedText = self.content.html();
-					
-					//Zustand vor Paste wiederherstellen
-					self.content.html(originalContent);
-					
-					//Auswahl-Nodes anhand Indizes wiederherstellen
-					self._traverseDOMTree(document.getElementById('content_field'), function(node) {
-						if(anchorNodeIndex == 0) {
-							anchorNode = node;
-						}
-						anchorNodeIndex--;
-						if(focusNodeIndex == 0) {
-							focusNode = node;
-						}
-						focusNodeIndex--;
-					});
-					
-					//einzufügenden Text als Paragraph in Textfeld einfügen
-					var insertion = {
-						anchorNode: anchorNode,
-						focusNode: focusNode,
-						anchorOffset: anchorOffset,
-						focusOffset: focusOffset,
-						content: pastedText
-					};
-					self.formatRaw('insert', '', insertion);
-					self._checkOnEmptiness();
+					//ungültige Formatierungen entfernen
+					self._removeInvalidFormatting();
+					self.pasteLock = false;
 				}, 0);
 			});
 			
@@ -173,24 +117,20 @@
 				this._trigger('onStopEditing', null, this.data);
 			}
 		},
-		//leeres Textfeld bei Bedarf mit Standardtext füllen
-		_checkOnEmptiness: function(input) {
+		//leeres Textfeld mit Paragraph initialisieren
+		_checkOnEmptiness: function() {
 			var self = this;
 			setTimeout(function() {
-				if(input == 13) {
-					self.content.find('br').replaceWith('&nbsp;');
-				}
-				else {
-					self.content.find('br').replaceWith(' ');
-				}
-				if($.trim(self.content.text()) == '') {
-					self.content.html('<p>' + self.options.defaultText + '</p>');
-					var range = rangy.createRange();
-					var node = document.getElementById('content_field').firstChild.firstChild;
-					range.setStart(node, 0);
-					range.setEnd(node, node.data.length);
-					rangy.getSelection().setSingleRange(range);
-				}
+				self.content.contents().each(function() {
+					var n = $(this);
+					if(this.nodeType == 3 || this.tagName.toLowerCase() == 'br') {
+						n.wrap('<p/>');
+						var range = rangy.createRange();
+						range.setStart(this, this.data ? this.data.length : 0);
+						range.setEnd(this, this.data ? this.data.length : 0);
+						rangy.getSelection().setSingleRange(range);
+					}
+				});
 			}, 0);
 		},
 		//Undo-Redo-System initialisieren
@@ -263,8 +203,6 @@
 			var self = this;
 			var o = this.options;
 			
-			this.content.focus();
-			
 			//Auswahldaten aus aktueller Auswahl oder insertion-Objekt (nach Paste-Vorgang -> Einsetzen des neu einzufügenden Textes) beziehen
 			var anchorNode, anchorOffset, focusNode, focusOffset;
 			if(insertion) {
@@ -277,19 +215,26 @@
 			}
 			else {
 				var sel = rangy.getSelection();
+				if(sel.isCollapsed) {
+					this.content.focus();
+					sel = rangy.getSelection();
+				}
 				anchorNode = sel.anchorNode;
 				anchorOffset = sel.anchorOffset;
 				focusNode = sel.focusNode;
 				focusOffset = sel.focusOffset;
 			}
 			
-			//Inline- oder Blockformatierung?
-			var inline = ($.inArray(tag, o.inlineHtmlElements) != -1 || tag == 'clear') && tag != 'insert';
+			//Inline- oder Blockformatierung? ('insert' gilt als Blockformatierung)
+			var inline = ($.inArray(tag, o.inlineHtmlElements) != -1);
+			
+			var median = tag == 'clear' || tag == 'a';
+			var medianInP = false;
 			
 			//Richtung der Auswahl (vorwärts/rückwärts) bestimmen und standardisieren
 			var node1, node2, offset1, offset2;
 			var foundAnchor = false, foundFocus = false;
-			this._traverseDOMTree(document.getElementById('content_field'), function(node) {
+			this._traverseDOMTree(document.getElementById('content_field'), -1, function(node, level) {
 				if(foundAnchor == false) {
 					if(node == anchorNode) {
 						if(foundFocus == false) {
@@ -312,7 +257,7 @@
 						foundFocus = true;
 					}
 				}
-			});
+			}, null);
 			if(anchorNode == focusNode) {
 				if(anchorOffset == focusOffset && tag != 'insert') {
 					offset1 = 0;
@@ -340,231 +285,284 @@
 			
 			
 			var htmlContent = "";
-			var aLevelNode, bLevelNode, cLevelNode;
-			var aLevelNodeTag, bLevelNodeTag, bLevelNodeAttrs;
+			var nodeStack = new Array(), nodeTagStack = new Array(), nodeAttrsStack = new Array();
 			var handled1 = false, handled2 = false;
 			
-			//falls kompletter Textfeld-Inhalt ausgewählt wurde, Auswahl auf ersten und letzten Nachfolger (Textnodes) des Textfeldes reduzieren
-			if(node1 == node2 && node1 == document.getElementById('content_field')) {
+			//Auswahl auf Textknoten reduzieren
+			if(node1.nodeType == 1) {
 				while(node1.nodeType == 1) {
-					node1 = node1.firstChild;
+					if(node1.firstChild == null) {
+						$(node1.parentNode).prepend(' ');
+						node1 = node1.parentNode.firstChild;
+					}
+					else {
+						node1 = node1.firstChild;
+					}
 				}
 				offset1 = 0;
-				if(tag != 'insert') {
-					while(node2.nodeType == 1) {
+			}
+			if(node2.nodeType == 1) {
+				while(node2.nodeType == 1) {
+					if(node2.lastChild == null) {
+						$(node2.parentNode).append(' ');
+						node2 = node2.parentNode.lastChild;
+					}
+					else {
 						node2 = node2.lastChild;
 					}
-					offset2 = node2.data.length;
 				}
-				else {
-					node2 = node1;
-					offset2 = 0;
+				offset2 = node2.data.length;
+			}
+			
+			//für "Median"-Elemente (clear, a) überprüfen, ob die Auswahl in einem Paragraphen startet und endet
+			if(median) {
+				var p1 = false;
+				$(node1).parentsUntil(this.content).each(function() {
+					if(this.tagName.toLowerCase() == 'p') {
+						p1 = true;
+					}
+				});
+				if(p1) {
+					$(node2).parentsUntil(this.content).each(function() {
+						if(this.tagName.toLowerCase() == 'p') {
+							medianInP = true;
+						}
+					});
 				}
 			}
 			
-			//alle direkten Nachfolger des Textfeldes (Paragraphen und Headlines -> Level-A-Nodes) durchlaufen
-			this.content.contents().each(function() {
-				aLevelNode = this;
-				aLevelNodeTag = $(aLevelNode).get(0).tagName.toLowerCase();
+			//alle Elemente durchlaufen
+			this._traverseDOMTree(document.getElementById('content_field'), -1, function(node, level) {
 				
-				//falls kompletter Level-A-Node ausgewählt wurde, Auswahl auf ersten und letzten Nachfolger (Textnodes) dieses Nodes reduzieren
-				if(node1 == node2 && node1 == aLevelNode) {
-					while(node1.nodeType == 1) {
-						node1 = node1.firstChild;
+				if(level == -1) {
+					return;
+				}
+				
+				//aktueller Knoten = Elementknoten -> Eigenschaften auslesen und in Stack speichern
+				var jQNode = $(node), nodeTag, nodeAttrs;
+				if(node.nodeType == 1) {
+					nodeTag = node.tagName.toLowerCase();
+					
+					if(nodeTag == 'br') {
+						htmlContent += '<br>';
 					}
-					offset1 = 0;
-					if(tag != 'insert') {
-						while(node2.nodeType == 1) {
-							node2 = node2.lastChild;
+					
+					nodeAttrs = '';
+					for(var i = 0; i < o.validAttrs.length; i++) {
+						var a = o.validAttrs[i];
+						if(jQNode.attr(a)) {
+							nodeAttrs += ' ' + a + '=' + jQNode.attr(a);
 						}
-						offset2 = node2.data.length;
+					}
+					if(nodeStack.length <= level) {
+						nodeStack.push(node);
+						nodeTagStack.push(nodeTag);
+						nodeAttrsStack.push(nodeAttrs);
 					}
 					else {
-						node2 = node1;
-						offset2 = 0;
+						nodeStack[level] = node;
+						nodeTagStack[level] = nodeTag;
+						nodeAttrsStack[level] = nodeAttrs;
+					};
+				}
+				
+				//oberste Ebene (Blockelemente)
+				if(level == 0) {
+					if(inline || !handled1 || handled2) {
+						htmlContent += '<' + nodeTag + nodeAttrs + '>';
 					}
 				}
-				
-				//öffnendes Tag des Level-A-Nodes schreiben
-				if(inline || handled1 == false || handled2 == true) {
-					htmlContent += '<' + aLevelNodeTag + '>';
-				}
-				
-				//alle direkten Nachfolger des Level-A-Nodes durchlaufen
-				$(aLevelNode).contents().each(function() {
-					
-					bLevelNode = this;
-					
-					//Level-B-Node ist ein Elementnode...
-					if(this.nodeType == 1) {
-						bLevelNodeTag = $(bLevelNode).get(0).tagName.toLowerCase();
-						if(bLevelNodeTag == 'span') {
-							bLevelNodeAttrs = ' class=\"' + $(bLevelNode).attr('class') + '\"';
-						}
-						else if(bLevelNodeTag == 'a') {
-							bLevelNodeAttrs = ' href=\"' + $(bLevelNode).attr('href') + '\" title=\"' + $(bLevelNode).attr('title') + '\"';
-						}
-						else {
-							bLevelNodeAttrs = "";
-						}
-						
-						//Level-C-Node ist ein Textnode!
-						cLevelNode = this.firstChild;
-						
-						//Auswahl ausschließlich innerhalb dieses Level-C-Nodes...
-						if(node1 == node2 && node1 == cLevelNode) {
-							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>'
-									+ Encoder.htmlEncode(cLevelNode.data.substring(0, offset1)) + '</' + bLevelNodeTag + '>';
-							if(inline == false) {
-								htmlContent += '</' + aLevelNodeTag + '>';
+				//tiefere Ebene (Median- und Inlineelemente)
+				else {
+					//Elementknoten
+					if(node.nodeType == 1) {
+						htmlContent += '<' + Encoder.htmlEncode(nodeTag + nodeAttrs) + '>';
+					}
+					//Textknoten
+					else if(node.nodeType == 3) {
+						//Auswahl liegt komplett im Knoten...
+						if(node == node1 && node == node2) {
+							if(inline) {
+								htmlContent += Encoder.htmlEncode(node.data.substring(0, offset1)) + '<' + tag + attrs + '>'
+										+ Encoder.htmlEncode(node.data.substring(offset1, offset2)) + '</' + tag + '>'
+										+ Encoder.htmlEncode(node.data.substring(offset2, node.data.length));
 							}
-							htmlContent += '<' + tag + attrs + '>' + Encoder.htmlEncode(cLevelNode.data.substring(offset1, offset2)) + '</' + tag + '>';
-							if(inline == false) {
-								htmlContent += '<' + aLevelNodeTag + '>';
+							else {
+								htmlContent += Encoder.htmlEncode(node.data.substring(0, offset1));
+								for(var i = level - 1; i >= medianInP ? 1 : 0; i--) {
+									htmlContent += '</' + nodeTagStack[i] + '>';
+								}
+								htmlContent += '<' + tag + attrs + '>';
+								for(var i = 1; i < level; i++) {
+									htmlContent += '<' + nodeTagStack[i] + nodeAttrsStack[i] + '>';
+								}
+								htmlContent += Encoder.htmlEncode(node.data.substring(offset1, offset2));
+								for(var i = level - 1; i >= 1; i--) {
+									htmlContent += '</' + nodeTagStack[i] + '>';
+								}
+								htmlContent += '</' + tag + '>';
+								for(var i = medianInP ? 1 : 0; i < level; i++) {
+									htmlContent += '<' + nodeTagStack[i] + nodeAttrsStack[i] + '>';
+								}
+								htmlContent += Encoder.htmlEncode(node.data.substring(offset2, node.data.length));
 							}
-							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>' + Encoder.htmlEncode(cLevelNode.data.substring(offset2, cLevelNode.data.length))
-									+ '</' + bLevelNodeTag + '>';
 							handled1 = handled2 = true;
 						}
-						//Auswahl beginnt auf diesem Level-C-Node...
-						else if(node1 == cLevelNode) {
-							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>'
-									+ Encoder.htmlEncode(cLevelNode.data.substring(0, offset1)) + '</' + bLevelNodeTag + '>';
-							if(inline == false) {
-								htmlContent += '</' + aLevelNodeTag + '>';
+						//Auswahl beginnt im Knoten...
+						else if(node == node1) {
+							if(inline) {
+								htmlContent += Encoder.htmlEncode(node.data.substring(0, offset1)) + '<' + tag + attrs + '>'
+										+ Encoder.htmlEncode(node.data.substring(offset1, node.data.length)) + '</' + tag + '>';
 							}
-							htmlContent += '<' + tag + attrs + '>'
-									+ Encoder.htmlEncode(cLevelNode.data.substring(offset1, cLevelNode.data.length));
-							if(inline && bLevelNode == aLevelNode.lastChild) {
-								htmlContent += '</' + tag + '>';
+							else {
+								htmlContent += Encoder.htmlEncode(node.data.substring(0, offset1));
+								for(var i = level - 1; i >= medianInP ? 1 : 0; i--) {
+									htmlContent += '</' + nodeTagStack[i] + '>';
+								}
+								htmlContent += '<' + tag + attrs + '>';
+								for(var i = 1; i < level; i++) {
+									htmlContent += '<' + nodeTagStack[i] + nodeAttrsStack[i] + '>';
+								}
+								htmlContent += Encoder.htmlEncode(node.data.substring(offset1, node.data.length));
 							}
 							handled1 = true;
 						}
-						//Auswahl endet auf diesem Level-C-Node...
-						else if(node2 == cLevelNode) {
-							if(inline && bLevelNode == aLevelNode.firstChild) {
-								htmlContent += '<' + tag + attrs + '>';
+						//Auswahl endet im Knoten...
+						else if(node == node2) {
+							if(inline) {
+								htmlContent += '<' + tag + attrs + '>' + Encoder.htmlEncode(node.data.substring(0, offset2))
+										+ '</' + tag + '>' + Encoder.htmlEncode(node.data.substring(offset2, node.data.length));
 							}
-							htmlContent += Encoder.htmlEncode(cLevelNode.data.substring(0, offset2)) + '</' + tag + '>';
-							if(inline == false) {
-								htmlContent += '<' + aLevelNodeTag + '>';
+							else {
+								htmlContent += Encoder.htmlEncode(node.data.substring(0, offset2));
+								for(var i = level - 1; i >= 1; i--) {
+									htmlContent += '</' + nodeTagStack[i] + '>';
+								}
+								htmlContent += '</' + tag + '>';
+								for(var i = medianInP ? 1 : 0; i < level; i++) {
+									htmlContent += '<' + nodeTagStack[i] + nodeAttrsStack[i] + '>';
+								}
+								htmlContent += Encoder.htmlEncode(node.data.substring(offset2, node.data.length));
 							}
-							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>'
-									+ Encoder.htmlEncode(cLevelNode.data.substring(offset2, cLevelNode.data.length)) + '</' + bLevelNodeTag + '>';
 							handled2 = true;
 						}
-						//Auswahl geht komplett über diesen Level-C-Node...
-						else if(handled1 == true && handled2 == false) {
-							if(inline && bLevelNode == aLevelNode.firstChild) {
-								htmlContent += '<' + tag + attrs + '>';
+						//Auswahl erstreckt sich komplett über Knoten...
+						else if(handled1 && !handled2) {
+							if(inline) {
+								htmlContent += '<' + tag + attrs + '>' + Encoder.htmlEncode(node.data) + '</' + tag + '>';
 							}
-							htmlContent += Encoder.htmlEncode(cLevelNode.data);
-							if(inline && bLevelNode == aLevelNode.lastChild) {
-								htmlContent += '</' + tag + '>';
+							else {
+								htmlContent += Encoder.htmlEncode(node.data);
 							}
 						}
-						//Auswahl berührt diesen Level-C-Node nicht...
+						//Auswahl berührt Knoten nicht
 						else {
-							htmlContent += '<' + bLevelNodeTag + bLevelNodeAttrs + '>' + Encoder.htmlEncode(cLevelNode.data) + '</' + bLevelNodeTag + '>';
+							htmlContent += Encoder.htmlEncode(node.data);
 						}
 					}
-					//Level-B-Node ist ein Textnode...
-					else if(this.nodeType == 3) {
-						//Auswahl ausschließlich innerhalb dieses Level-B-Nodes...
-						if(node1 == node2 && node1 == bLevelNode) {
-							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(0, offset1));
-							if(inline == false) {
-								htmlContent += '</' + aLevelNodeTag + '>';
-							}
-							htmlContent += '<' + tag + attrs + '>' + Encoder.htmlEncode(bLevelNode.data.substring(offset1, offset2)) + '</' + tag + '>';
-							if(inline == false) {
-								htmlContent += '<' + aLevelNodeTag + '>';
-							}
-							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(offset2, bLevelNode.data.length));
-							handled1 = handled2 = true;
-						}
-						//Auswahl beginnt auf diesem Level-B-Node...
-						else if(node1 == bLevelNode) {
-							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(0, offset1));
-							if(inline == false) {
-								htmlContent += '</' + aLevelNodeTag + '>';
-							}
-							htmlContent += '<' + tag + attrs + '>' + Encoder.htmlEncode(bLevelNode.data.substring(offset1, bLevelNode.data.length));
-							if(inline && bLevelNode == aLevelNode.lastChild) {
-								htmlContent += '</' + tag + '>';
-							}
-							handled1 = true;
-						}
-						//Auswahl endet auf diesem Level-B-Node...
-						else if(node2 == bLevelNode) {
-							if(inline && bLevelNode == aLevelNode.firstChild) {
-								htmlContent += '<' + tag + attrs + '>';
-							}
-							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(0, offset2)) + '</' + tag + '>';
-							if(inline == false) {
-								htmlContent += '<' + aLevelNodeTag + '>';
-							}
-							htmlContent += Encoder.htmlEncode(bLevelNode.data.substring(offset2, bLevelNode.data.length));
-							handled2 = true;
-						}
-						//Auswahl geht komplett über diesen Level-B-Node...
-						else if(handled1 == true && handled2 == false) {
-							if(inline && bLevelNode == aLevelNode.firstChild) {
-								htmlContent += '<' + tag + attrs + '>';
-							}
-							htmlContent += Encoder.htmlEncode(bLevelNode.data);
-							if(inline && bLevelNode == aLevelNode.lastChild) {
-								htmlContent += '</' + tag + '>';
-							}
-						}
-						//Auswahl berührt diesen Level-B-Node nicht...
-						else {
-							htmlContent += Encoder.htmlEncode(bLevelNode.data);
-						}
-					}
-				});
+				}
 				
-				//schließendes Tag des Level-A-Nodes schreiben
-				if(inline || handled1 == false || handled2 == true) {
-					htmlContent += '</' + aLevelNodeTag + '>';
+			}, function(node, level) {
+				
+				if(level == -1) {
+					return;
+				}
+				
+				var jQNode = $(node), nodeTag;
+				if(node.nodeType == 1) {
+					nodeTag = node.tagName.toLowerCase();
+				}
+				
+				if(level == 0) {
+					if(inline || !handled1 || handled2) {
+						htmlContent += '</' + nodeTag + '>';
+					}
+				}
+				else {
+					if(node.nodeType == 1) {
+						htmlContent += '</' + nodeTag + '>';
+					}
 				}
 				
 			});
 			
-			//Paste-Text einsetzen
-			if(insertion) {
-				var rawInsertion = insertion.content.replace(/<br[^>]*>/gi, '<-br->');
-				rawInsertion = rawInsertion.replace(/<\/?[^-][a-z]*[^>]*>/gi, '');
-				var linesToInsert = rawInsertion.split('<-br->');
-				var formattedInsertion = '';
-				for(var i = 0; i < linesToInsert.length; i++) {
-					formattedInsertion += '<p>' + Encoder.htmlEncode(linesToInsert[i]) + '</p>';
-				}
-				htmlContent = htmlContent.replace(/<insert>[^<]*<\/insert>/i, formattedInsertion);
+			//alert(htmlContent);
+			
+			//leere Nodes entfernen
+			while(htmlContent.search(/<[a-z]+[^>]*><\/[a-z]+[^>]*>/g) != -1) {
+				htmlContent = htmlContent.replace(/<[a-z]+[^>]*><\/[a-z]+[^>]*>/g, '');
 			}
 			
-			//leere Nodes und <br>-Tags entfernen
-			htmlContent = htmlContent.replace(/<[a-z]+[^>]*><\/[a-z]+[^>]*>/gi, '');
-			htmlContent = htmlContent.replace(/<br[^>]*>/gi, '&nbsp;');
-			
 			//zu löschende Formatierungen entfernen
-			htmlContent = htmlContent.replace(/<h([1-6])>([^<]*)<clear>([^<]*)<\/clear>([^<]*)<\/h[1-6]>/gi, '<p>$2$3$4</p>');
-			htmlContent = htmlContent.replace(/<clear>([^<]*)<\/clear>/gi, '$1');
+			var stringToClear, index;
+			if((index = htmlContent.search(/<clear>/)) != -1) {
+				stringToClear = htmlContent.substring(index + '<clear>'.length, htmlContent.search(/<\/clear>/));
+				stringToClear = stringToClear.replace(/<\/?(?!br)[^>]*>/g, '');
+				htmlContent = htmlContent.replace(/<clear>.*<\/clear>/, '');
+				htmlContent = htmlContent.substring(0, index) + stringToClear + htmlContent.substring(index, htmlContent.length);
+			}
 			
 			//Textfeld mit neuem Inhalt füllen
 			this.content.html(htmlContent);
 			
+			//paragraphenlosen Inhalt wrappen
+			this.content.contents().each(function() {
+				if(this.nodeType == 3) {
+					$(this).wrap('<p/>');
+				}
+			});
+			
 			//Auswahl aufheben
-			sel.setSingleRange(null);
+			var range = rangy.createRange();
+			range.setStart(document.getElementById('content_field'), 0);
+			range.setEnd(document.getElementById('content_field'), 0)
+			rangy.getSelection().setSingleRange(range);
 			
 		},
 		//alle Nodes des Textfeldes durchlaufen
-		_traverseDOMTree: function(node, action) {
-			action(node);
+		_traverseDOMTree: function(node, level, actionFirst, actionLast) {
+			actionFirst(node, level);
 			var childs = node.childNodes.length;
 			for(var i = 0; i < childs; i++) {
-				this._traverseDOMTree(node.childNodes[i], action);
+				this._traverseDOMTree(node.childNodes[i], level + 1, actionFirst, actionLast);
 			}
+			if(actionLast != null) {
+				actionLast(node, level);
+			}
+		},
+		//ungültige Formatierungen entfernen
+		_removeInvalidFormatting: function() {
+			var o = this.options;
+			this.content.find('*').each(function() {
+				if(this.nodeType == 1) {
+					var n = $(this);
+					var tag = this.tagName.toLowerCase();
+					if($.inArray(tag, o.inlineHtmlElements) == -1 && $.inArray(tag, o.blockHtmlElements) == -1
+							&& $.inArray(tag, o.medianHtmlElements) == -1) {
+						n.contents().unwrap();
+						n.remove();
+					}
+					else {
+						for(var i = 0; i < this.attributes.length; i++) {
+							if($.inArray(this.attributes[i].nodeName, o.validAttrs) == -1) {
+								this.removeAttribute(this.attributes[i].nodeName);
+							}
+						}
+					}
+				}
+			});
+			
+			var htmlContent = this.content.html();
+			while(htmlContent.search(/<[a-z]+[^>]*> ?<\/[a-z]+[^>]*>/g) != -1) {
+				htmlContent = htmlContent.replace(/<[a-z]+[^>]*> ?<\/[a-z]+[^>]*>/g, '');
+			}
+			this.content.html(htmlContent);
+			
+			this.content.contents().each(function() {
+				if(this.nodeType == 3) {
+					$(this).wrap('<p/>');
+				}
+			});
 		},
 		//einfach formatieren
 		format: function(tag) {
@@ -593,15 +591,19 @@
 			firstChange: true,
 			indexOfLastFirstChange: 0
 		},
+		pasteLock: false,
 		editMode: false,
 		options: {
 			styles: [],												//CSS-Klassennamen
 			undoStackSize: 200,										//Größe des Undo-Stacks (max. Anzahl an Undo-Operationen)
 			inlineHtmlElements:										//HTML-Elemente, die inline eingesetzt werden
-				['em', 'strong', 'span', 'a'],
+				['em', 'strong', 'span'],
+			medianHtmlElements:										//HTML-Elemente, die nur in manchen Blockelementen (p) inline sein können
+				['a'],
 			blockHtmlElements:										//HTML-Elemente, die als Blöcke eingesetzt werden
 				['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'],
-			defaultText: 'Enter text here...',						//Standardtext bei leerem Textfeld
+			validAttrs:												//alle Attribute, die Elemente haben können
+				['class', 'href', 'title'],
 			
 			//########## CALLBACKS -> werden vom Anwender überschrieben:
 			
