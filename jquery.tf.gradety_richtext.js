@@ -1,5 +1,5 @@
 (function($) {
-	$.widget("tf.gradety_rt", {
+	$.widget('tf.gradety_rt', {
 		_create: function() {
 			var self = this;
 			var o = this.options;
@@ -83,9 +83,8 @@
 					undo: function() { self.undo() },
 					redo: function() { self.redo() },
 					defineLink: function() { self.defineLink() },
-					insertLink: function(url, title) { self.insertLink(url, title) },
-					format: function(tag) { self.format(tag) },
-					formatWithCSS: function(css) { self.formatWithCSS(css) },
+					insertLink: function(url, title, css) { self.insertLink(url, title, css) },
+					format: function(tag, css) { self.format(tag, css) },
 					clearFormat: function() { self.clearFormat() },
 					clearAll: function() { self.clearAll() }
 				}
@@ -123,7 +122,7 @@
 			setTimeout(function() {
 				self.content.contents().each(function() {
 					var n = $(this);
-					if(this.nodeType == 3 || this.tagName.toLowerCase() == 'br') {
+					if(this.nodeType == 3 || $.inArray(this.tagName.toLowerCase(), self.options.blockHtmlElements) == -1) {
 						n.wrap('<p/>');
 						var range = rangy.createRange();
 						range.setStart(this, this.data ? this.data.length : 0);
@@ -228,7 +227,7 @@
 			//Inline- oder Blockformatierung? ('insert' gilt als Blockformatierung)
 			var inline = ($.inArray(tag, o.inlineHtmlElements) != -1);
 			
-			var median = tag == 'clear' || tag == 'a';
+			var median = tag == 'clear';
 			var medianInP = false;
 			
 			//Richtung der Auswahl (vorwärts/rückwärts) bestimmen und standardisieren
@@ -284,7 +283,7 @@
 			}
 			
 			
-			var htmlContent = "";
+			var htmlContent = '';
 			var nodeStack = new Array(), nodeTagStack = new Array(), nodeAttrsStack = new Array();
 			var handled1 = false, handled2 = false;
 			
@@ -314,7 +313,7 @@
 				offset2 = node2.data.length;
 			}
 			
-			//für "Median"-Elemente (clear, a) überprüfen, ob die Auswahl in einem Paragraphen startet und endet
+			//für "Median"-Elemente (clear) überprüfen, ob die Auswahl in einem Paragraphen startet und endet
 			if(median) {
 				var p1 = false;
 				$(node1).parentsUntil(this.content).each(function() {
@@ -351,7 +350,7 @@
 					for(var i = 0; i < o.validAttrs.length; i++) {
 						var a = o.validAttrs[i];
 						if(jQNode.attr(a)) {
-							nodeAttrs += ' ' + a + '=' + jQNode.attr(a);
+							nodeAttrs += ' ' + a + '=\"' + jQNode.attr(a) + '\"';
 						}
 					}
 					if(nodeStack.length <= level) {
@@ -370,13 +369,19 @@
 				if(level == 0) {
 					if(inline || !handled1 || handled2) {
 						htmlContent += '<' + nodeTag + nodeAttrs + '>';
+						if(node.firstChild == null) {
+							htmlContent += '&nbsp;';
+						}
 					}
 				}
 				//tiefere Ebene (Median- und Inlineelemente)
 				else {
 					//Elementknoten
-					if(node.nodeType == 1) {
-						htmlContent += '<' + Encoder.htmlEncode(nodeTag + nodeAttrs) + '>';
+					if(node.nodeType == 1 && nodeTag != 'br') {
+						htmlContent += '<' + nodeTag + nodeAttrs + '>';
+						if(node.firstChild == null) {
+							htmlContent += '&nbsp;';
+						}
 					}
 					//Textknoten
 					else if(node.nodeType == 3) {
@@ -473,14 +478,16 @@
 					nodeTag = node.tagName.toLowerCase();
 				}
 				
-				if(level == 0) {
-					if(inline || !handled1 || handled2) {
-						htmlContent += '</' + nodeTag + '>';
+				if(nodeTag != 'br') {
+					if(level == 0) {
+						if(inline || !handled1 || handled2) {
+							htmlContent += '</' + nodeTag + '>';
+						}
 					}
-				}
-				else {
-					if(node.nodeType == 1) {
-						htmlContent += '</' + nodeTag + '>';
+					else {
+						if(node.nodeType == 1) {
+							htmlContent += '</' + nodeTag + '>';
+						}
 					}
 				}
 				
@@ -488,26 +495,31 @@
 			
 			//alert(htmlContent);
 			
-			//leere Nodes entfernen
-			while(htmlContent.search(/<[a-z]+[^>]*><\/[a-z]+[^>]*>/g) != -1) {
-				htmlContent = htmlContent.replace(/<[a-z]+[^>]*><\/[a-z]+[^>]*>/g, '');
-			}
-			
 			//zu löschende Formatierungen entfernen
 			var stringToClear, index;
 			if((index = htmlContent.search(/<clear>/)) != -1) {
 				stringToClear = htmlContent.substring(index + '<clear>'.length, htmlContent.search(/<\/clear>/));
-				stringToClear = stringToClear.replace(/<\/?(?!br)[^>]*>/g, '');
+				stringToClear = stringToClear.replace(/<(?!br)\/?[^>]*>/g, '');
 				htmlContent = htmlContent.replace(/<clear>.*<\/clear>/, '');
 				htmlContent = htmlContent.substring(0, index) + stringToClear + htmlContent.substring(index, htmlContent.length);
 			}
+			
+			//<br>s wrappen
+			htmlContent = htmlContent.replace(/<br>(?!<\/p>)/gi, '</p><p>');
+			
+			//leere Nodes entfernen
+			while(htmlContent.search(/<(?!br)[a-z]+[^>]*><\/[a-z]+[^>]*>/g) != -1) {
+				htmlContent = htmlContent.replace(/<(?!br)[a-z]+[^>]*><\/[a-z]+[^>]*>/g, '');
+			}
+			
+			//alert(htmlContent);
 			
 			//Textfeld mit neuem Inhalt füllen
 			this.content.html(htmlContent);
 			
 			//paragraphenlosen Inhalt wrappen
 			this.content.contents().each(function() {
-				if(this.nodeType == 3) {
+				if(this.nodeType == 3 || $.inArray(this.tagName.toLowerCase(), o.blockHtmlElements) == -1) {
 					$(this).wrap('<p/>');
 				}
 			});
@@ -537,40 +549,62 @@
 				if(this.nodeType == 1) {
 					var n = $(this);
 					var tag = this.tagName.toLowerCase();
-					if($.inArray(tag, o.inlineHtmlElements) == -1 && $.inArray(tag, o.blockHtmlElements) == -1
-							&& $.inArray(tag, o.medianHtmlElements) == -1) {
+					if(tag != 'br' && $.inArray(tag, o.inlineHtmlElements) == -1 && $.inArray(tag, o.blockHtmlElements) == -1) {
 						n.contents().unwrap();
 						n.remove();
 					}
 					else {
+						var invalidAttrs = new Array();
 						for(var i = 0; i < this.attributes.length; i++) {
 							if($.inArray(this.attributes[i].nodeName, o.validAttrs) == -1) {
-								this.removeAttribute(this.attributes[i].nodeName);
+								invalidAttrs.push(this.attributes[i].nodeName);
 							}
+						}
+						for(var i = 0; i < invalidAttrs.length; i++) {
+							this.removeAttribute(invalidAttrs[i]);
 						}
 					}
 				}
 			});
 			
-			var htmlContent = this.content.html();
-			while(htmlContent.search(/<[a-z]+[^>]*> ?<\/[a-z]+[^>]*>/g) != -1) {
-				htmlContent = htmlContent.replace(/<[a-z]+[^>]*> ?<\/[a-z]+[^>]*>/g, '');
-			}
-			this.content.html(htmlContent);
+			//alert(this.content.html());
 			
+			//paragraphenlosen Inhalt wrappen
 			this.content.contents().each(function() {
-				if(this.nodeType == 3) {
+				if(this.nodeType == 3 || $.inArray(this.tagName.toLowerCase(), o.blockHtmlElements) == -1) {
 					$(this).wrap('<p/>');
 				}
 			});
+			
+			//alert(this.content.html());
+			
+			var htmlContent = this.content.html();
+			
+			//<br>s wrappen
+			htmlContent = htmlContent.replace(/<br>(?!<\/p>)/gi, '</p><p>');
+			
+			//&nbsp;s entfernen
+			htmlContent = htmlContent.replace(/\s*&nbsp;\s*(?!<\/p>)/gi, '');
+			
+			//leere Nodes entfernen
+			while(htmlContent.search(/<(?!br)[a-z]+[^>]*>\s*<\/[a-z]+[^>]*>/gi) != -1) {
+				htmlContent = htmlContent.replace(/<(?!br)[a-z]+[^>]*>\s*<\/[a-z]+[^>]*>/gi, '');
+			}
+			
+			this.content.html(htmlContent);
+			
+			//paragraphenlosen Inhalt erneut wrappen
+			setTimeout(function() {
+				this.content.contents().each(function() {
+					if(this.nodeType == 3 || $.inArray(this.tagName.toLowerCase(), o.blockHtmlElements) == -1) {
+						$(this).wrap('<p/>');
+					}
+				});
+			}, 0);
 		},
-		//einfach formatieren
-		format: function(tag) {
-			this.formatRaw(tag, '');
-		},
-		//mit CSS-Klasse formatieren
-		formatWithCSS: function(css) {
-			this.formatRaw('span', ' class=\"' + css + '\"');
+		//formatieren (optional mit CSS-Klasse(n))
+		format: function(tag, css) {
+			this.formatRaw(tag, (css ? ' class=\"' + css + '\"' : ''));
 		},
 		//Formatierung entfernen
 		clearFormat: function() {
@@ -579,11 +613,11 @@
 		//alle Formatierungen entfernen
 		clearAll: function() {
 			this.updateUndoStack(false);
-			this.content.html('<p>' + this.content.text() + '</p>');
+			this.content.html('<p>' + Encoder.htmlEncode(this.content.text()) + '</p>');
 		},
-		//Auswahl als Link formatieren
-		insertLink: function(url, title) {
-			this.formatRaw('a', ' href=\"' + url + '\" title=\"' + title + '\"');
+		//Auswahl als Link formatieren (optional mit CSS-Klasse(n))
+		insertLink: function(url, title, css) {
+			this.formatRaw('a', ' href=\"' + url + '\" title=\"' + title + '\"' + (css ? ' class=\"' + css + '\"' : ''));
 		},
 		undoSystem: {
 			stack: [],
@@ -594,15 +628,12 @@
 		pasteLock: false,
 		editMode: false,
 		options: {
-			styles: [],												//CSS-Klassennamen
 			undoStackSize: 200,										//Größe des Undo-Stacks (max. Anzahl an Undo-Operationen)
 			inlineHtmlElements:										//HTML-Elemente, die inline eingesetzt werden
-				['em', 'strong', 'span'],
-			medianHtmlElements:										//HTML-Elemente, die nur in manchen Blockelementen (p) inline sein können
-				['a'],
+				['em', 'strong', 'span', 'a'],
 			blockHtmlElements:										//HTML-Elemente, die als Blöcke eingesetzt werden
 				['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'],
-			validAttrs:												//alle Attribute, die Elemente haben können
+			validAttrs:												//alle erlaubten Attribute
 				['class', 'href', 'title'],
 			
 			//########## CALLBACKS -> werden vom Anwender überschrieben:
@@ -611,7 +642,7 @@
 			onCreate: function(event, data) {
 				var headerHeight = 30;
 				var sidebarWidth = 100;
-				var buttonWidth = 60;
+				var buttonWidth = 90;
 				var buttonMargin = 3;
 				var borderWidth = 1;
 				var width = data.element.width();
@@ -623,73 +654,73 @@
 						.click(function() {
 							data.logic.startEditing();
 						});
-				data.ui.header = $("<div>").attr("id", "header")
+				data.ui.header = $('<div>').attr('id', 'header')
 						.css({'width':''+width+'px', 'height':''+headerHeight+'px', 'position': 'absolute', 'top':'0px', 'left':'0px', 'background-color': '#FFFFFF'})
 						.appendTo(data.element);
-				data.ui.sidebar = $("<div>").attr("id", "sidebar")
+				data.ui.sidebar = $('<div>').attr('id', 'sidebar')
 						.css({'width':''+sidebarWidth+'px', 'height':''+(height-headerHeight)+'px', 'position': 'absolute', 'top':''+headerHeight+'px', 'left':''+(contentWidth+2*borderWidth)+'px', 'background-color': '#FFFFFF'})
 						.appendTo(data.element);
-				data.ui.acceptButton = $("<input>").attr("id", "accept_changes_btn").attr("type", "button").attr("value", "Accept")
+				data.ui.acceptButton = $('<input>').attr('id', 'accept_changes_btn').attr('type', 'button').attr('value', 'Accept')
 						.css(buttonStyle).css({'background-color':'#11EE11', 'border-color':'#22EE22'})
 						.appendTo(data.ui.header)
 						.click(function() {
 							data.logic.stopEditing(true);
 						});
-				data.ui.cancelButton = $("<input>").attr("id", "cancel_changes_btn").attr("type", "button").attr("value", "Cancel")
+				data.ui.cancelButton = $('<input>').attr('id', 'cancel_changes_btn').attr('type', 'button').attr('value', 'Cancel')
 						.css(buttonStyle).css({'background-color':'#EE1111', 'border-color':'#EE2222'})
 						.appendTo(data.ui.header)
 						.click(function() {
 							data.logic.stopEditing(false);
 						});
-				data.ui.undoButton = $("<input>").attr("id", "undo_btn").attr("type", "button").attr("value", "Undo")
+				data.ui.undoButton = $('<input>').attr('id', 'undo_btn').attr('type', 'button').attr('value', 'Undo')
 						.css(buttonStyle).css({'background-color':'#EEEEEE'})
 						.appendTo(data.ui.header)
 						.click(function() {
 							data.logic.undo();
 						});
-				data.ui.redoButton = $("<input>").attr("id", "redo_btn").attr("type", "button").attr("value", "Redo")
+				data.ui.redoButton = $('<input>').attr('id', 'redo_btn').attr('type', 'button').attr('value', 'Redo')
 						.css(buttonStyle).css({'background-color':'#EEEEEE'})
 						.appendTo(data.ui.header)
 						.click(function() {
 							data.logic.redo();
 						});
-				data.ui.linkButton = $("<input>").attr("id", "link_btn").attr("type", "button").attr("value", "Link...")
+				data.ui.linkButton = $('<input>').attr('id', 'link_btn').attr('type', 'button').attr('value', 'Link...')
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
 						.appendTo(data.ui.sidebar)
 						.click(function() {
 							data.logic.defineLink();
 						});
-				data.ui.clearAllButton = $("<input>").attr("id", "clear_all_btn").attr("type", "button").attr("value", "Clear all")
+				data.ui.clearAllButton = $('<input>').attr('id', 'clear_all_btn').attr('type', 'button').attr('value', 'Clear all')
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
 						.appendTo(data.ui.sidebar)
 						.click(function() {
 							data.logic.clearAll();
 						});
-				data.ui.formatButton1 = $("<input>").attr("id", "format_btn_1").attr("type", "button").attr("value", "h1")
+				data.ui.formatButton1 = $('<input>').attr('id', 'format_btn_1').attr('type', 'button').attr('value', 'h1_blue')
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
 						.appendTo(data.ui.sidebar)
 						.click(function() {
-							data.logic.format('h1');
+							data.logic.format('h1', 'blue');
 						});
-				data.ui.formatButton2 = $("<input>").attr("id", "format_btn_2").attr("type", "button").attr("value", "em")
+				data.ui.formatButton2 = $('<input>').attr('id', 'format_btn_2').attr('type', 'button').attr('value', 'em_big red')
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
 						.appendTo(data.ui.sidebar)
 						.click(function() {
-							data.logic.format('em');
+							data.logic.format('em', 'big red');
 						});
-				data.ui.formatButton3 = $("<input>").attr("id", "format_btn_3").attr("type", "button").attr("value", "strong")
+				data.ui.formatButton3 = $('<input>').attr('id', 'format_btn_3').attr('type', 'button').attr('value', 'strong_blue')
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
 						.appendTo(data.ui.sidebar)
 						.click(function() {
-							data.logic.format('strong');
+							data.logic.format('strong', 'blue');
 						});
-				data.ui.formatButton4 = $("<input>").attr("id", "format_btn_4").attr("type", "button").attr("value", "red")
+				data.ui.formatButton4 = $('<input>').attr('id', 'format_btn_4').attr('type', 'button').attr('value', 'span_red')
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
 						.appendTo(data.ui.sidebar)
 						.click(function() {
-							data.logic.formatWithCSS('red');
+							data.logic.format('span', 'red');
 						});
-				data.ui.clearFormatButton = $("<input>").attr("id", "clear_format_btn").attr("type", "button").attr("value", "Clear")
+				data.ui.clearFormatButton = $('<input>').attr('id', 'clear_format_btn').attr('type', 'button').attr('value', 'Clear')
 						.css(buttonStyle).css({'float':'top', 'background-color':'#EEEEEE'})
 						.appendTo(data.ui.sidebar)
 						.click(function() {
@@ -760,9 +791,9 @@
 			},
 			//wird aufgerufen, sobald ein Link eingegeben werden soll
 			onDefineLink: function(event, data) {
-				var url = window.prompt("URL:", "http://");
+				var url = window.prompt('URL:', 'http://');
 				if(url != null) {
-					var title = window.prompt("Title (shown while hovering):", url);
+					var title = window.prompt('Title (shown while hovering):', url);
 					data.logic.insertLink(url, title);
 				}
 			}
