@@ -544,13 +544,16 @@
 		},
 		//ungültige Formatierungen entfernen
 		_removeInvalidFormatting: function() {
+			var self = this;
 			var o = this.options;
 			this.content.find('*').each(function() {
 				if(this.nodeType == 1) {
 					var n = $(this);
 					var tag = this.tagName.toLowerCase();
 					if(tag != 'br' && $.inArray(tag, o.inlineHtmlElements) == -1 && $.inArray(tag, o.blockHtmlElements) == -1) {
-						n.contents().unwrap();
+						if(tag != 'iframe') {
+							n.contents().unwrap();
+						}
 						n.remove();
 					}
 					else {
